@@ -86,7 +86,7 @@ Notes:
 - Writable mounts may still need Full Disk Access / admin rights depending on
   your macOS version.
 
-### 5. This app
+### 4. This app
 
 ```bash
 cd ~/MyCode/dislocker-ui
