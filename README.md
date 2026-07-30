@@ -32,64 +32,57 @@ If needed: https://brew.sh
 
 ### 2. FUSE backend (required)
 
-Pick one. **macFUSE** is the common choice with Homebrew `dislocker`; approve the
-system extension in **System Settings → Privacy & Security** after install,
-then reboot if macOS asks.
+**macFUSE** is required for the Homebrew macOS formulae below. After install,
+approve the system extension in **System Settings → Privacy & Security**, then
+reboot if macOS asks.
 
 ```bash
 brew install --cask macfuse
 ```
 
-Alternative (user-space, no kext): [FUSE-T](https://www.fuse-t.org/) via its tap.
-If you use FUSE-T, ensure `dislocker` and `ntfs-3g` are built/linked against it.
+(`brew install --cask` needs an interactive Terminal for `sudo`. You can also
+open the `.dmg` from the Homebrew cache and run **Install macFUSE.pkg**.)
 
-### 3. dislocker (required)
+### 3. dislocker + ntfs-3g (macOS Homebrew)
 
-```bash
-brew install dislocker
-```
-
-Confirm:
+Homebrew core’s `dislocker` / `ntfs-3g` formulae are awkward on modern macOS
+(no bottles / FUSE disabled). Use the community macFUSE tap:
 
 ```bash
-which dislocker-fuse || which dislocker
-dislocker-fuse -h | head
-```
-
-If Homebrew’s formula is unavailable on your OS version, build from
-[Aorimn/dislocker](https://github.com/Aorimn/dislocker) following its `INSTALL.md`
-(needs cmake, mbedtls, FUSE headers).
-
-### 4. ntfs-3g (optional — only for Finder write access)
-
-macOS can usually **read** NTFS without ntfs-3g. For **read/write** in Finder you
-need ntfs-3g (or a commercial NTFS driver). Homebrew core disables most FUSE
-formulae, so use a community tap:
-
-```bash
-# macFUSE must already be installed and allowed (step 2)
 brew tap gromgit/homebrew-fuse
-brew install gromgit/fuse/ntfs-3g-mac
+# Newer Homebrew may require:
+#   brew trust --formula gromgit/fuse/dislocker-mac
+#   brew trust --formula gromgit/fuse/ntfs-3g-mac
+brew install gromgit/fuse/dislocker-mac
+brew install gromgit/fuse/ntfs-3g-mac   # optional but needed for Finder write
 ```
 
 Confirm:
 
 ```bash
+which dislocker-fuse
+dislocker-fuse -h | head
 which ntfs-3g
 ntfs-3g --version
 ```
 
-Then click **Recheck deps** in dislocker-ui (or restart it). The Read-only
-checkbox can be unchecked when `ntfs-3g` is found.
+If `dislocker-fuse` fails with a missing `libmbedcrypto.16.dylib`, the bottle
+was built against mbedtls 3.x while Homebrew linked mbedtls 4.x. Fix:
+
+```bash
+brew install mbedtls@3
+ln -sf /opt/homebrew/opt/mbedtls@3/lib/libmbedcrypto.16.dylib \
+  /opt/homebrew/opt/mbedtls/lib/libmbedcrypto.16.dylib
+```
+
+(That symlink can break on `brew upgrade`; re-run if dislocker stops loading.)
+
+Then click **Recheck deps** in dislocker-ui (or restart it). Uncheck Read-only
+only when `ntfs-3g` is found.
 
 Notes:
 
-- Community taps are unsupported by Homebrew; prefer read-only if you do not
-  trust them or if the formula fails on your macOS version.
-- If the tap/build fails, options include building ntfs-3g from source against
-  macFUSE/FUSE-T, or using a commercial driver (Paragon, Tuxera). This app only
-  auto-detects a `ntfs-3g` binary on `PATH` (also checks
-  `/opt/homebrew/bin/ntfs-3g` and `/usr/local/bin/ntfs-3g`).
+- Community taps are unsupported by Homebrew.
 - Writable mounts may still need Full Disk Access / admin rights depending on
   your macOS version.
 
