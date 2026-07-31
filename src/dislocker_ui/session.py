@@ -17,10 +17,10 @@ Requirements:
 
 from __future__ import annotations
 
+import contextlib
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -43,7 +43,7 @@ def default_session_path() -> Path:
     return base / "active_session.json"
 
 
-def save_session(session: MountSession, path: Optional[Path] = None) -> Path:
+def save_session(session: MountSession, path: Path | None = None) -> Path:
     """Write session JSON; return the path written."""
     target = path or default_session_path()
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -51,7 +51,7 @@ def save_session(session: MountSession, path: Optional[Path] = None) -> Path:
     return target
 
 
-def load_session(path: Optional[Path] = None) -> Optional[MountSession]:
+def load_session(path: Path | None = None) -> MountSession | None:
     """Load a session if present; return None when missing or invalid."""
     target = path or default_session_path()
     if not target.is_file():
@@ -63,10 +63,8 @@ def load_session(path: Optional[Path] = None) -> Optional[MountSession]:
         return None
 
 
-def clear_session(path: Optional[Path] = None) -> None:
+def clear_session(path: Path | None = None) -> None:
     """Delete the session file if it exists."""
     target = path or default_session_path()
-    try:
+    with contextlib.suppress(OSError):
         target.unlink(missing_ok=True)
-    except OSError:
-        pass

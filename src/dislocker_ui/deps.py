@@ -19,29 +19,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from shutil import which
-from typing import Optional
 
 
 @dataclass(frozen=True)
 class DepsStatus:
     """Snapshot of tools available on this Mac."""
 
-    dislocker_fuse: Optional[str]
-    hdiutil: Optional[str]
-    diskutil: Optional[str]
-    mount: Optional[str]
-    umount: Optional[str]
-    ntfs3g: Optional[str]
+    dislocker_fuse: str | None
+    hdiutil: str | None
+    diskutil: str | None
+    mount: str | None
+    umount: str | None
+    ntfs3g: str | None
 
     @property
     def core_ok(self) -> bool:
         """True when the minimum mount toolchain is present."""
         return bool(
-            self.dislocker_fuse
-            and self.hdiutil
-            and self.diskutil
-            and self.mount
-            and self.umount
+            self.dislocker_fuse and self.hdiutil and self.diskutil and self.mount and self.umount
         )
 
     @property

@@ -25,10 +25,10 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Optional
 
 from dislocker_ui.deps import DepsStatus
 from dislocker_ui.session import MountSession, clear_session, load_session, save_session
@@ -102,8 +102,8 @@ def mount_volume(
 
     fuse_mount = Path(tempfile.mkdtemp(prefix="dislocker-ui-", dir="/tmp"))
     ntfs_mount = _allocate_volume_path(req.volume_label)
-    fuse_proc: Optional[subprocess.Popen[str]] = None
-    raw_disk: Optional[str] = None
+    fuse_proc: subprocess.Popen[str] | None = None
+    raw_disk: str | None = None
 
     try:
         cmd = _build_dislocker_cmd(deps, req, fuse_mount)
@@ -267,8 +267,7 @@ def _wait_for_file(
             if proc.stdout is not None:
                 out = proc.stdout.read() or ""
             raise RunnerError(
-                "dislocker-fuse exited before creating dislocker-file.\n"
-                + out.strip()
+                "dislocker-fuse exited before creating dislocker-file.\n" + out.strip()
             )
         time.sleep(0.25)
     raise RunnerError(f"Timed out waiting for {path}")
@@ -336,7 +335,7 @@ def _run(
 def _best_effort_cleanup(
     fuse_mount: Path,
     ntfs_mount: Path,
-    raw_disk: Optional[str],
+    raw_disk: str | None,
     log: LogFn,
 ) -> None:
     """Attempt to undo partial mount state after a failure."""

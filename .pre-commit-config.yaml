@@ -1,0 +1,85 @@
+# Basic local hooks for dislocker-ui (slim harness).
+#
+# Install once:
+#   pip install pre-commit
+#   pre-commit install -t pre-commit -t pre-push
+#   # (or plain `pre-commit install` when default_install_hook_types is honored)
+#
+# Run against all files:
+#   pre-commit run --all-files
+#
+# Update hook revisions:
+#   pre-commit autoupdate
+#
+# Runtime stays stdlib-only; pre-commit is optional developer tooling.
+
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  # Local policy checks
+  - repo: local
+    hooks:
+      - id: check-absolute-paths
+        name: "hygiene: no machine home paths"
+        entry: python3 hooks/check_absolute_paths.py
+        language: system
+        types: [text]
+        stages: [pre-commit]
+        description: >-
+          Blocks /Users/<name>, /home/<name>, Windows user profiles, and
+          sensitive ~/… paths. See hooks/check_absolute_paths.py.
+
+      - id: check-absolute-paths-push
+        name: "hygiene: no machine home paths (pre-push)"
+        entry: python3 hooks/check_absolute_paths.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+        description: >-
+          Full-tree home-path scan before push (same script as pre-commit).
+
+  # Secret scanning
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+        name: "secrets: gitleaks scan"
+
+  # General file hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: [--maxkb=5120]
+        name: "size: large file gate"
+      - id: detect-private-key
+        name: "secrets: private key detect"
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-symlinks
+      - id: destroyed-symlinks
+
+  # Python lint / format (config in pyproject.toml)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.13
+    hooks:
+      - id: ruff
+        name: "python: ruff lint"
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
+        name: "python: ruff format"
+
+  # Shell
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        name: "shell: shellcheck"

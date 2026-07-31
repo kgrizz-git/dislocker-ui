@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
+
+## [0.1.1] - 2026-07-30
+
+### Fixed
+
+- Mount/Unmount error dialogs no longer risk a blank/failed message when showing
+  exceptions from a background thread (Tk `after` lambdas now bind the message).
+
+### Changed
+
+- Repository hygiene (CI, pre-commit, Ruff, templates). See `CHANGELOG.dev.md`.
+
 ## [0.1.0] - 2026-07-30
 
 ### Added

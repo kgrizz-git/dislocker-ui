@@ -2,21 +2,94 @@
 .DS_Store
 .AppleDouble
 .LSOverride
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Repo harness scratch / local backups
+.context/
+backups/
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+*.egg
 *.egg-info/
 .eggs/
 dist/
 build/
+wheels/
+MANIFEST
+
+# Virtual environments
 .venv/
 venv/
+env/
+ENV/
 .env
+.env.local
+.env.*.local
+
+# Type checkers & linters
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.pyright/
+
+# Testing
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Editors
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/settings.json
+.vscode/launch.json
+.vscode/*.log
+
+# AI assistants (keep shared rules tracked; ignore personal local files)
+.claude/settings.local.json
+.claude/*.local.json
+.cursor/mcp.json
+
+# Secrets & credentials
+*.pem
+*.key
+*.p12
+*.pfx
+*.cer
+credentials.json
+service-account.json
+secrets.json
+*_rsa
+*_dsa
+*_ecdsa
+*_ed25519
+.netrc
+
+# Logs & temp
+*.log
+*.log.*
+logs/
+tmp/
+temp/
 
 # Project local
-tmp/
 *.session.json
-.idea/
-.vscode/
+
+# Pre-commit
+.pre-commit-cache/

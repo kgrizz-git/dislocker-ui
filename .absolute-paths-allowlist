@@ -1,0 +1,3 @@
+# Repo-relative paths allowed to mention machine home-path patterns.
+# One path per line. Prefer a line-level `absolute-path-allow` marker when possible.
+# hooks/check_absolute_paths.py is always allowed (documents the patterns).

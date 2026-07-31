@@ -4,7 +4,7 @@ Simple macOS GUI frontend for [dislocker](https://github.com/Aorimn/dislocker).
 It does **not** fork or reimplement BitLocker crypto — it shells out to an
 installed `dislocker-fuse` and then attaches/mounts the resulting NTFS image.
 
-**Version:** see `VERSION` (currently 0.1.0).
+**Version:** see `VERSION` (currently 0.1.1).
 
 ## What it does
 
@@ -89,7 +89,7 @@ Notes:
 ### 4. This app
 
 ```bash
-cd ~/MyCode/dislocker-ui
+cd /path/to/dislocker-ui
 chmod +x run.sh   # once
 ```
 
@@ -101,14 +101,14 @@ No Python packages beyond the stdlib (tkinter) are required.
 2. Launch the UI:
 
 ```bash
-cd ~/MyCode/dislocker-ui
+cd /path/to/dislocker-ui
 ./run.sh
 ```
 
 Or:
 
 ```bash
-cd ~/MyCode/dislocker-ui
+cd /path/to/dislocker-ui
 PYTHONPATH=src python3 -m dislocker_ui
 ```
 
@@ -149,8 +149,28 @@ carefully for your use case.
 src/dislocker_ui/   # application package
 tests/              # test helpers / scripts
 tmp/                # local scratch (gitignored)
+.context/           # agent/dev scratch (gitignored)
 run.sh              # launcher
+pyproject.toml      # packaging + Ruff config
+.pre-commit-config.yaml  # optional local hooks (incl. pre-push)
+hooks/              # local policy scripts (absolute-path check)
+.github/            # CI + issue/PR templates
 ```
+
+## Developer checks
+
+Runtime needs no pip packages. Optional lint/hooks:
+
+```bash
+pip install -e ".[dev]"   # ruff + pre-commit
+ruff check src tests hooks
+ruff format src tests hooks
+python3 hooks/check_absolute_paths.py
+pre-commit install -t pre-commit -t pre-push
+pre-commit run --all-files
+```
+
+CI on GitHub runs `compileall`, Ruff, absolute home-path check, and gitleaks.
 
 ## License
 

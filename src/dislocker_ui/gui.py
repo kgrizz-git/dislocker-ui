@@ -20,10 +20,17 @@ from __future__ import annotations
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+
 from dislocker_ui import __version__
 from dislocker_ui.deps import DepsStatus, discover_deps
 from dislocker_ui.disks import DiskEntry, list_disk_entries
-from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod, mount_volume, unmount_volume
+from dislocker_ui.runner import (
+    MountRequest,
+    RunnerError,
+    UnlockMethod,
+    mount_volume,
+    unmount_volume,
+)
 from dislocker_ui.session import load_session
 
 
@@ -58,9 +65,7 @@ class DislockerApp(ttk.Frame):
         deps_row.pack(fill=tk.X, pady=(0, 8))
         self.deps_label = ttk.Label(deps_row, text="", wraplength=600, justify=tk.LEFT)
         self.deps_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(deps_row, text="Recheck deps", command=self._recheck_deps).pack(
-            side=tk.RIGHT
-        )
+        ttk.Button(deps_row, text="Recheck deps", command=self._recheck_deps).pack(side=tk.RIGHT)
 
         vol_frame = ttk.LabelFrame(self, text="Volume", padding=8)
         vol_frame.pack(fill=tk.X, pady=4)
@@ -137,10 +142,7 @@ class DislockerApp(ttk.Frame):
         """Update the dependency summary line."""
         if self.deps.core_ok:
             write = "RW available (ntfs-3g found)" if self.deps.can_write else "RW needs ntfs-3g"
-            text = (
-                f"dislocker: {self.deps.dislocker_fuse}\n"
-                f"Core tools OK. {write}."
-            )
+            text = f"dislocker: {self.deps.dislocker_fuse}\nCore tools OK. {write}."
         else:
             missing = ", ".join(self.deps.missing_core())
             text = f"Missing required tools: {missing}. See README."
@@ -149,15 +151,11 @@ class DislockerApp(ttk.Frame):
     def _update_rw_hint(self) -> None:
         """Enable/disable RW based on ntfs-3g presence."""
         if self.deps.can_write:
-            self.rw_hint.configure(
-                text="Uncheck Read-only to mount with ntfs-3g (writable)."
-            )
+            self.rw_hint.configure(text="Uncheck Read-only to mount with ntfs-3g (writable).")
             self.readonly_check.configure(state=tk.NORMAL)
         else:
             self.readonly_var.set(True)
-            self.rw_hint.configure(
-                text="ntfs-3g not found — only read-only mounts are offered."
-            )
+            self.rw_hint.configure(text="ntfs-3g not found — only read-only mounts are offered.")
 
     def _on_method_change(self) -> None:
         """Toggle password vs BEK browse UI."""
@@ -246,22 +244,21 @@ class DislockerApp(ttk.Frame):
         def worker() -> None:
             try:
                 session = mount_volume(req, self.deps, self.log)
+                mount_path = session.ntfs_mount
                 self.master.after(
                     0,
-                    lambda: messagebox.showinfo(
-                        "Mounted", f"Available at:\n{session.ntfs_mount}"
+                    lambda path=mount_path: messagebox.showinfo(
+                        "Mounted", f"Available at:\n{path}"
                     ),
                 )
             except RunnerError as exc:
                 self.log(f"ERROR: {exc}")
-                self.master.after(
-                    0, lambda: messagebox.showerror("Mount failed", str(exc))
-                )
-            except Exception as exc:  # noqa: BLE001 — surface unexpected errors in UI
+                err = str(exc)
+                self.master.after(0, lambda msg=err: messagebox.showerror("Mount failed", msg))
+            except Exception as exc:
                 self.log(f"ERROR: {exc}")
-                self.master.after(
-                    0, lambda: messagebox.showerror("Mount failed", str(exc))
-                )
+                err = str(exc)
+                self.master.after(0, lambda msg=err: messagebox.showerror("Mount failed", msg))
             finally:
                 self.master.after(0, lambda: self._set_busy(False))
                 self.master.after(0, self._refresh_session_status)
@@ -278,19 +275,15 @@ class DislockerApp(ttk.Frame):
         def worker() -> None:
             try:
                 unmount_volume(self.deps, self.log)
-                self.master.after(
-                    0, lambda: messagebox.showinfo("Unmounted", "Volume unmounted.")
-                )
+                self.master.after(0, lambda: messagebox.showinfo("Unmounted", "Volume unmounted."))
             except RunnerError as exc:
                 self.log(f"ERROR: {exc}")
-                self.master.after(
-                    0, lambda: messagebox.showerror("Unmount failed", str(exc))
-                )
-            except Exception as exc:  # noqa: BLE001
+                err = str(exc)
+                self.master.after(0, lambda msg=err: messagebox.showerror("Unmount failed", msg))
+            except Exception as exc:
                 self.log(f"ERROR: {exc}")
-                self.master.after(
-                    0, lambda: messagebox.showerror("Unmount failed", str(exc))
-                )
+                err = str(exc)
+                self.master.after(0, lambda msg=err: messagebox.showerror("Unmount failed", msg))
             finally:
                 self.master.after(0, lambda: self._set_busy(False))
                 self.master.after(0, self._refresh_session_status)

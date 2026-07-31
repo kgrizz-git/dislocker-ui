@@ -1,0 +1,57 @@
+# Packaging / tool config for dislocker-ui.
+#
+# Runtime: Python stdlib only (tkinter). No install-time dependencies.
+# Optional developer tooling: pip install -e ".[dev]" or use pre-commit.
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dislocker-ui"
+dynamic = ["version"]
+description = "macOS GUI frontend for an installed dislocker (BitLocker) toolchain"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Personal use; see README (dislocker is GPL-2.0-or-later)" }
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit>=3.5.0",
+    "ruff>=0.11.0",
+]
+
+[project.scripts]
+dislocker-ui = "dislocker_ui.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { file = "VERSION" }
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests", "hooks"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # bugbear
+    "SIM", # simplify
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501", # line length handled by formatter / docs
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
