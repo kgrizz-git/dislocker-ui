@@ -86,6 +86,9 @@ Sonar scan while Automatic Analysis is on.
 CodeRabbit automatic PR reviews are **off** (`.coderabbit.yaml`). Request a
 review with `@coderabbitai review` when wanted.
 
+Public contribution posture: Issues welcome; PRs may be limited to collaborators
+(see `CONTRIBUTING.md` / `SECURITY.md`). Do not file public security issues.
+
 ## Security / privileges
 
 Mounting BitLocker volumes usually needs elevated rights to open `/dev/disk*`.

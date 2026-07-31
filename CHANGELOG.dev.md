@@ -6,6 +6,14 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.1.5] - 2026-07-31
+
+### Added
+
+- `SECURITY.md`, `CONTRIBUTING.md`, `.github/CODEOWNERS`, `.github/dependabot.yml`
+  (pip + GitHub Actions weekly), issue template `config.yml` with security /
+  contributing contact links.
+
 ## [0.1.4] - 2026-07-31
 
 ### Added
