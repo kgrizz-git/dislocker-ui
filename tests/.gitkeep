@@ -1,0 +1,1 @@
+# Keep an empty tests/ tree in git so CI path args (ruff check src tests hooks) resolve.

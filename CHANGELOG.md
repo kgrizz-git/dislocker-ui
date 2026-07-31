@@ -15,6 +15,11 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
   commercial use + copyleft, and that dislocker / FUSE / ntfs-3g remain separate
   dependencies under their own licenses.
 
+### Fixed
+
+- Track `tests/.gitkeep` so CI `ruff check src tests hooks` does not fail on a
+  missing `tests/` directory.
+
 ## [0.1.1] - 2026-07-30
 
 ### Fixed
