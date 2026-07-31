@@ -6,6 +6,18 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.1.4] - 2026-07-31
+
+### Added
+
+- `.coderabbit.yaml` with `reviews.auto_review.enabled: false` (manual
+  `@coderabbitai review` still works).
+
+### Changed
+
+- `runner.py`: FUSE temp dirs via `tempfile.mkdtemp()` (no `dir="/tmp"`);
+  extract mount validation / NTFS mount / unmount helpers for Sonar S3776.
+
 ## [0.1.3] - 2026-07-30
 
 ### Added

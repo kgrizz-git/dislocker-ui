@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Last reviewed: 2026-07-30
+Last reviewed: 2026-07-31
 
 Guidance for coding agents working on **dislocker-ui**.
 
@@ -82,6 +82,9 @@ Source files soft-cap at **600** lines and hard-cap at **800**
 SonarCloud: prefer **Automatic Analysis** (GitHub App; no `SONAR_TOKEN`).
 Optional scope tweaks live in `.sonarcloud.properties`. Do not add a CI-based
 Sonar scan while Automatic Analysis is on.
+
+CodeRabbit automatic PR reviews are **off** (`.coderabbit.yaml`). Request a
+review with `@coderabbitai review` when wanted.
 
 ## Security / privileges
 

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.1.4] - 2026-07-31
+
+### Changed
+
+- FUSE staging directories are created under the process temp dir instead of
+  world-writable `/tmp` (Sonar `python:S5443`).
+
+### Fixed
+
+- Reduced cognitive complexity of mount/unmount orchestration helpers.
+
 ## [0.1.3] - 2026-07-30
 
 ### Added
