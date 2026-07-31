@@ -1,0 +1,11 @@
+# Default owners for review requests on pull requests.
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Requires the GitHub user to have write access. With collaborator-only PRs,
+# this mainly notifies the maintainer.
+
+*       @kgrizz-git
+
+/.github/       @kgrizz-git
+/hooks/         @kgrizz-git
+/src/           @kgrizz-git

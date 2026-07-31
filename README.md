@@ -4,7 +4,10 @@ Simple macOS GUI frontend for [dislocker](https://github.com/Aorimn/dislocker).
 It does **not** fork or reimplement BitLocker crypto — it shells out to an
 installed `dislocker-fuse` and then attaches/mounts the resulting NTFS image.
 
-**Version:** see `VERSION` (currently 0.1.4).
+**Version:** see `VERSION` (currently 0.1.5).
+
+Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## What it does
 

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.1.5] - 2026-07-31
+
+### Added
+
+- Public-repo meta: `SECURITY.md`, `CONTRIBUTING.md`, `CODEOWNERS`, Dependabot
+  version updates, and issue-template contact links for private security reports.
+
 ## [0.1.4] - 2026-07-31
 
 ### Changed
