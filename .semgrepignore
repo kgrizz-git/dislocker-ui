@@ -1,0 +1,11 @@
+# Paths Semgrep should skip (scratch, envs, caches).
+tmp/
+.context/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.eggs/
+dist/
+build/

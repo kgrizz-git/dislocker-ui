@@ -175,7 +175,8 @@ pre-commit run --all-files
 ```
 
 CI on GitHub runs compileall, Ruff (incl. complexity), absolute-path and
-line-count checks, pytest with coverage, pip-audit, and gitleaks.
+line-count checks, pytest with coverage, pip-audit, Semgrep (OWASP Top 10 +
+Python rules), and gitleaks.
 
 ### SonarCloud (Automatic Analysis)
 

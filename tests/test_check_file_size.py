@@ -23,7 +23,8 @@ def _load_checker() -> ModuleType:
     """Load the hook module by path (hooks/ is not a Python package)."""
     path = Path(__file__).resolve().parents[1] / "hooks" / "check_file_size.py"
     spec = importlib.util.spec_from_file_location("check_file_size", path)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)

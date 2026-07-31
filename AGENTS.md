@@ -56,6 +56,9 @@ pytest --cov --cov-report=term-missing
 python3 hooks/check_absolute_paths.py
 python3 hooks/check_file_size.py
 pip-audit
+# Optional local Semgrep (matches CI rulesets):
+#   docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep \
+#     semgrep scan --config p/owasp-top-ten --config p/python --error --metrics=off
 ```
 
 Optional local hooks (developer machine):
