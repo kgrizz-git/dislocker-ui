@@ -13,7 +13,7 @@ dynamic = ["version"]
 description = "macOS GUI frontend for an installed dislocker (BitLocker) toolchain"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Personal use; see README (dislocker is GPL-2.0-or-later)" }
+license = { text = "GPL-3.0-or-later" }
 dependencies = []
 
 [project.optional-dependencies]

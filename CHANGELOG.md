@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.1.2] - 2026-07-30
+
+### Changed
+
+- Licensed the project as **GPL-3.0-or-later** (see `LICENSE`). README clarifies
+  commercial use + copyleft, and that dislocker / FUSE / ntfs-3g remain separate
+  dependencies under their own licenses.
+
 ## [0.1.1] - 2026-07-30
 
 ### Fixed

@@ -40,6 +40,8 @@ Prefer extending these modules over adding a second parallel flow.
 - Do not log passwords or recovery keys.
 - Update `VERSION` + `CHANGELOG.md` for user-visible changes (semver).
 - Put harness / CI / docs-only notes in `CHANGELOG.dev.md`.
+- License: **GPL-3.0-or-later** (see `LICENSE`). Do not reintroduce “personal use
+  only” license language. Dislocker / FUSE / ntfs-3g stay separate dependencies.
 - Put throwaway files under `tmp/` (gitignored). Put one-off test scripts under `tests/`.
 - Put agent scratch (plans, notes) under `.context/` (gitignored); never commit secrets there.
 
