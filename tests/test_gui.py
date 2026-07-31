@@ -318,14 +318,15 @@ def test_on_mount_success_builds_request_and_dialog(tk_root: tk.Tk, sync_threads
     assert "Mount starting" in app.log_text.get("1.0", tk.END)
 
 
-def test_on_mount_runner_error_shows_dialog(tk_root: tk.Tk, sync_threads: None) -> None:
-    """RunnerError from mount_volume is logged and shown to the user."""
+@pytest.mark.parametrize(
+    "exc",
+    [RunnerError("bad password"), RuntimeError("boom")],
+)
+def test_on_mount_error_shows_dialog(tk_root: tk.Tk, sync_threads: None, exc: Exception) -> None:
+    """RunnerError and unexpected exceptions both surface a Mount failed dialog."""
     app = _build_app(tk_root)
     with (
-        patch(
-            "dislocker_ui.gui.mount_volume",
-            side_effect=RunnerError("bad password"),
-        ),
+        patch("dislocker_ui.gui.mount_volume", side_effect=exc),
         patch("dislocker_ui.gui.messagebox.showerror") as showerror,
     ):
         app.on_mount()
@@ -333,22 +334,8 @@ def test_on_mount_runner_error_shows_dialog(tk_root: tk.Tk, sync_threads: None) 
     assert not app._busy
     showerror.assert_called_once()
     assert showerror.call_args.args[0] == "Mount failed"
-    assert "bad password" in showerror.call_args.args[1]
-    assert "ERROR: bad password" in app.log_text.get("1.0", tk.END)
-
-
-def test_on_mount_unexpected_error_shows_dialog(tk_root: tk.Tk, sync_threads: None) -> None:
-    """Non-RunnerError exceptions still surface a Mount failed dialog."""
-    app = _build_app(tk_root)
-    with (
-        patch("dislocker_ui.gui.mount_volume", side_effect=RuntimeError("boom")),
-        patch("dislocker_ui.gui.messagebox.showerror") as showerror,
-    ):
-        app.on_mount()
-
-    assert not app._busy
-    assert showerror.call_args.args[0] == "Mount failed"
-    assert "boom" in showerror.call_args.args[1]
+    assert str(exc) in showerror.call_args.args[1]
+    assert f"ERROR: {exc}" in app.log_text.get("1.0", tk.END)
 
 
 def test_on_unmount_success(tk_root: tk.Tk, sync_threads: None) -> None:
@@ -368,35 +355,23 @@ def test_on_unmount_success(tk_root: tk.Tk, sync_threads: None) -> None:
     assert "Unmount starting" in app.log_text.get("1.0", tk.END)
 
 
-def test_on_unmount_runner_error(tk_root: tk.Tk, sync_threads: None) -> None:
-    """Unmount RunnerError opens an error dialog and logs the message."""
+@pytest.mark.parametrize(
+    "exc",
+    [RunnerError("still busy"), OSError("detach")],
+)
+def test_on_unmount_error_shows_dialog(tk_root: tk.Tk, sync_threads: None, exc: Exception) -> None:
+    """RunnerError and unexpected exceptions both surface an Unmount failed dialog."""
     app = _build_app(tk_root)
     with (
-        patch(
-            "dislocker_ui.gui.unmount_volume",
-            side_effect=RunnerError("still busy"),
-        ),
+        patch("dislocker_ui.gui.unmount_volume", side_effect=exc),
         patch("dislocker_ui.gui.messagebox.showerror") as showerror,
     ):
         app.on_unmount()
 
     assert not app._busy
+    showerror.assert_called_once()
     assert showerror.call_args.args[0] == "Unmount failed"
-    assert "still busy" in showerror.call_args.args[1]
-
-
-def test_on_unmount_unexpected_error(tk_root: tk.Tk, sync_threads: None) -> None:
-    """Unexpected Unmount failures still show Unmount failed."""
-    app = _build_app(tk_root)
-    with (
-        patch("dislocker_ui.gui.unmount_volume", side_effect=OSError("detach")),
-        patch("dislocker_ui.gui.messagebox.showerror") as showerror,
-    ):
-        app.on_unmount()
-
-    assert not app._busy
-    assert showerror.call_args.args[0] == "Unmount failed"
-    assert "detach" in showerror.call_args.args[1]
+    assert str(exc) in showerror.call_args.args[1]
 
 
 def test_on_unmount_noop_when_busy(tk_root: tk.Tk) -> None:

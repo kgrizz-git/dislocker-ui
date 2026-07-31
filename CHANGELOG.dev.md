@@ -19,6 +19,8 @@ Version numbers match `VERSION` / SemVer with the public changelog.
 - Coverage `fail_under` **70 → 80**; stop omitting `gui.py` (still omit
   `runner.py` and `__main__.py`).
 - CI pytest step runs under `xvfb-run` so headless Linux can exercise tkinter.
+- Keep 0.1.6 notes in this file only (no user-facing `CHANGELOG.md` section).
+- Parametrize Mount/Unmount error-path GUI tests (`RunnerError` vs unexpected).
 
 ## [0.1.5] - 2026-07-31
 
