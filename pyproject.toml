@@ -73,7 +73,6 @@ addopts = ["-q"]
 branch = true
 source = ["dislocker_ui"]
 omit = [
-    "*/dislocker_ui/gui.py",
     "*/dislocker_ui/runner.py",
     "*/dislocker_ui/__main__.py",
 ]
@@ -81,7 +80,7 @@ omit = [
 [tool.coverage.report]
 show_missing = true
 skip_covered = false
-fail_under = 70
+fail_under = 80
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",

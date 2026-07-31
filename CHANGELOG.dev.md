@@ -6,6 +6,22 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.1.6] - 2026-07-31
+
+### Added
+
+- `tests/test_gui.py`: headless tkinter coverage for deps banner, RW gating,
+  unlock-method / BEK browse UI, volume resolution, Mount/Unmount success and
+  error paths, busy guards, and `run_app` startup.
+
+### Changed
+
+- Coverage `fail_under` **70 → 80**; stop omitting `gui.py` (still omit
+  `runner.py` and `__main__.py`).
+- CI pytest step runs under `xvfb-run` so headless Linux can exercise tkinter.
+- Keep 0.1.6 notes in this file only (no user-facing `CHANGELOG.md` section).
+- Parametrize Mount/Unmount error-path GUI tests (`RunnerError` vs unexpected).
+
 ## [0.1.5] - 2026-07-31
 
 ### Added
