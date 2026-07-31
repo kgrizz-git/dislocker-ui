@@ -4,7 +4,7 @@ Simple macOS GUI frontend for [dislocker](https://github.com/Aorimn/dislocker).
 It does **not** fork or reimplement BitLocker crypto — it shells out to an
 installed `dislocker-fuse` and then attaches/mounts the resulting NTFS image.
 
-**Version:** see `VERSION` (currently 0.1.2).
+**Version:** see `VERSION` (currently 0.1.3).
 
 ## What it does
 
@@ -162,15 +162,19 @@ hooks/              # local policy scripts (absolute-path check)
 Runtime needs no pip packages. Optional lint/hooks:
 
 ```bash
-pip install -e ".[dev]"   # ruff + pre-commit
+pip install -e ".[dev]"   # ruff, pre-commit, pytest, pip-audit
 ruff check src tests hooks
 ruff format src tests hooks
+pytest --cov --cov-report=term-missing
 python3 hooks/check_absolute_paths.py
+python3 hooks/check_file_size.py
+pip-audit                 # prefer a clean venv, not a shared global env
 pre-commit install -t pre-commit -t pre-push
 pre-commit run --all-files
 ```
 
-CI on GitHub runs `compileall`, Ruff, absolute home-path check, and gitleaks.
+CI on GitHub runs compileall, Ruff (incl. complexity), absolute-path and
+line-count checks, pytest with coverage, pip-audit, and gitleaks.
 
 ## License
 

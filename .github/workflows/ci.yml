@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   python:
-    name: compileall + ruff
+    name: lint + test + coverage
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,9 +20,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
-      - name: Install Ruff
-        run: pip install "ruff>=0.11.0"
+      - name: Install package and dev tools
+        run: pip install -e ".[dev]"
 
       - name: Byte-compile package
         run: python3 -m compileall -q -f src
@@ -35,6 +36,30 @@ jobs:
 
       - name: Absolute home-path check
         run: python3 hooks/check_absolute_paths.py
+
+      - name: File line-count check
+        run: python3 hooks/check_file_size.py
+
+      - name: Pytest with coverage
+        run: pytest --cov --cov-report=term-missing
+
+  audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install package and dev tools
+        run: pip install -e ".[dev]"
+
+      - name: Audit installed dependencies
+        run: pip-audit --progress-spinner off
 
   secrets:
     name: gitleaks

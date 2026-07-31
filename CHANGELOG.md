@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.1.3] - 2026-07-30
+
+### Added
+
+- Unit tests for `session`, `deps`, and `disks` (pytest).
+- Coverage gate on core modules (GUI/runner omitted for now); CI `pip-audit` on
+  the `[dev]` install set; file line-count and complexity (Ruff C901) checks.
+
 ## [0.1.2] - 2026-07-30
 
 ### Changed

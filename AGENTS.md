@@ -52,13 +52,16 @@ PYTHONPATH=src python3 -m dislocker_ui
 python3 -m compileall -q src
 ruff check src tests hooks
 ruff format --check src tests hooks
+pytest --cov --cov-report=term-missing
 python3 hooks/check_absolute_paths.py
+python3 hooks/check_file_size.py
+pip-audit
 ```
 
 Optional local hooks (developer machine):
 
 ```bash
-pip install -e ".[dev]"   # or: pip install pre-commit ruff
+pip install -e ".[dev]"   # or: pip install pre-commit ruff pytest pytest-cov pip-audit
 pre-commit install -t pre-commit -t pre-push
 pre-commit run --all-files
 ```
@@ -68,6 +71,10 @@ Never commit machine-specific home paths (literal `/Users/<you>/…`,
 Prefer `$HOME`, `Path.home()`, or repo-relative paths.
 Suppress a single line with `absolute-path-allow`, or list a file in
 `.absolute-paths-allowlist`.
+
+Source files soft-cap at **600** lines and hard-cap at **1000**
+(`hooks/check_file_size.py`). Cyclomatic complexity soft-gated by Ruff `C901`
+(max 12). Coverage fail-under is **70%** on core modules (gui/runner omitted).
 
 ## Security / privileges
 

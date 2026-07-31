@@ -6,6 +6,16 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.1.3] - 2026-07-30
+
+### Added
+
+- pytest suite: `tests/test_session.py`, `test_deps.py`, `test_disks.py`.
+- Ruff mccabe complexity (`C90`, max 12).
+- `hooks/check_file_size.py` on pre-commit and pre-push (soft 600 / hard 1000).
+- CI: pytest + coverage (`fail_under=70`, omit gui/runner/`__main__`), `pip-audit`.
+- Dev extras: `pytest`, `pytest-cov`, `pip-audit`.
+
 ## [0.1.2] - 2026-07-30
 
 ### Changed
