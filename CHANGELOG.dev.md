@@ -16,6 +16,8 @@ Version numbers match `VERSION` / SemVer with the public changelog.
 ### Fixed
 
 - Add `tests/.gitkeep` so the empty tests tree exists in CI for Ruff path args.
+- `pyproject.toml`: PEP 639 SPDX `license` string + `license-files`, require
+  `setuptools>=77` (CodeRabbit nit).
 
 ## [0.1.1] - 2026-07-30
 
