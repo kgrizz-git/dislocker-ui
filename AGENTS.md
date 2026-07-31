@@ -77,7 +77,7 @@ Suppress a single line with `absolute-path-allow`, or list a file in
 
 Source files soft-cap at **600** lines and hard-cap at **800**
 (`hooks/check_file_size.py`). Cyclomatic complexity soft-gated by Ruff `C901`
-(max 12). Coverage fail-under is **70%** on core modules (gui/runner omitted).
+(max 12). Coverage fail-under is **80%** (omit `runner` / `__main__`; GUI covered).
 
 SonarCloud: prefer **Automatic Analysis** (GitHub App; no `SONAR_TOKEN`).
 Optional scope tweaks live in `.sonarcloud.properties`. Do not add a CI-based

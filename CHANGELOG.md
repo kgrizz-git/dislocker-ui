@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.1.6] - 2026-07-31
+
+### Added
+
+- Unit tests for the Mount/Unmount tkinter UI (mocked deps, disks, and runner).
+
+### Changed
+
+- Local coverage gate raised to **80%** (aligned with SonarCloud); GUI module
+  included in measured coverage (`runner` / `__main__` still omitted).
+
 ## [0.1.5] - 2026-07-31
 
 ### Added
