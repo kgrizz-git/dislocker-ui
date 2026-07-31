@@ -12,8 +12,10 @@ Version numbers match `VERSION` / SemVer with the public changelog.
 
 - pytest suite: `tests/test_session.py`, `test_deps.py`, `test_disks.py`.
 - Ruff mccabe complexity (`C90`, max 12).
-- `hooks/check_file_size.py` on pre-commit and pre-push (soft 600 / hard 1000).
+- `hooks/check_file_size.py` on pre-commit and pre-push (soft 600 / hard **800**).
 - CI: pytest + coverage (`fail_under=70`, omit gui/runner/`__main__`), `pip-audit`.
+- SonarCloud Automatic Analysis config via `.sonarcloud.properties` (no CI token;
+  enable Automatic Analysis in the SonarCloud project UI after importing the repo).
 - Dev extras: `pytest`, `pytest-cov`, `pip-audit`.
 
 ## [0.1.2] - 2026-07-30

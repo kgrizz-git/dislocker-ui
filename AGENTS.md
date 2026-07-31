@@ -72,9 +72,13 @@ Prefer `$HOME`, `Path.home()`, or repo-relative paths.
 Suppress a single line with `absolute-path-allow`, or list a file in
 `.absolute-paths-allowlist`.
 
-Source files soft-cap at **600** lines and hard-cap at **1000**
+Source files soft-cap at **600** lines and hard-cap at **800**
 (`hooks/check_file_size.py`). Cyclomatic complexity soft-gated by Ruff `C901`
 (max 12). Coverage fail-under is **70%** on core modules (gui/runner omitted).
+
+SonarCloud: prefer **Automatic Analysis** (GitHub App; no `SONAR_TOKEN`).
+Optional scope tweaks live in `.sonarcloud.properties`. Do not add a CI-based
+Sonar scan while Automatic Analysis is on.
 
 ## Security / privileges
 

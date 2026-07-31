@@ -14,6 +14,11 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 - Unit tests for `session`, `deps`, and `disks` (pytest).
 - Coverage gate on core modules (GUI/runner omitted for now); CI `pip-audit` on
   the `[dev]` install set; file line-count and complexity (Ruff C901) checks.
+- SonarCloud Automatic Analysis support (`.sonarcloud.properties`).
+
+### Changed
+
+- Source file hard line-count cap is **800** (soft warning remains 600).
 
 ## [0.1.2] - 2026-07-30
 

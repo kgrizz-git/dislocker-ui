@@ -46,7 +46,7 @@ repos:
         types: [file]
         stages: [pre-commit]
         description: >-
-          Soft 600 / hard 1000 lines for source; higher caps for docs.
+          Soft 600 / hard 800 lines for source; higher caps for docs.
           See hooks/check_file_size.py.
 
       - id: check-file-size-push

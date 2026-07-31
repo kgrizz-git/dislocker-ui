@@ -153,7 +153,8 @@ tmp/                # local scratch (gitignored)
 run.sh              # launcher
 pyproject.toml      # packaging + Ruff config
 .pre-commit-config.yaml  # optional local hooks (incl. pre-push)
-hooks/              # local policy scripts (absolute-path check)
+hooks/              # local policy scripts (absolute-path / line-count)
+.sonarcloud.properties   # SonarCloud Automatic Analysis scope
 .github/            # CI + issue/PR templates
 ```
 
@@ -175,6 +176,20 @@ pre-commit run --all-files
 
 CI on GitHub runs compileall, Ruff (incl. complexity), absolute-path and
 line-count checks, pytest with coverage, pip-audit, and gitleaks.
+
+### SonarCloud (Automatic Analysis)
+
+No `SONAR_TOKEN` is required for the default setup:
+
+1. Sign in at [SonarQube Cloud](https://sonarcloud.io) with GitHub and import
+   `kgrizz-git/dislocker-ui` (public / open-source plan is fine).
+2. In the project: **Administration → Analysis Method → Automatic Analysis** → on.
+3. Optional: keep [`.sonarcloud.properties`](.sonarcloud.properties) for source/test
+   paths (already in this repo).
+
+Do **not** also run a CI-based Sonar scan while Automatic Analysis is enabled
+(SonarCloud rejects that combo). Coverage upload needs CI-based analysis later
+if you want it.
 
 ## License
 
