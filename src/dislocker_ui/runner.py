@@ -12,7 +12,8 @@ Inputs:
 
 Outputs:
   MountSession on success; raised RunnerError on failure.
-  Side effects: FUSE mount, raw disk attach, /Volumes mount, session file.
+  Side effects: FUSE mount under the process temp dir (not world-writable
+  /tmp), raw disk attach, /Volumes mount, session file.
 
 Requirements:
   dislocker-fuse, hdiutil, mount/umount; optional ntfs-3g for writable mounts.
@@ -70,37 +71,10 @@ def mount_volume(
     Starts dislocker-fuse in the background, attaches the virtual NTFS file as
     a raw disk, then mounts it read-only (stock ntfs) or read-write (ntfs-3g).
     """
-    if not deps.core_ok:
-        missing = ", ".join(deps.missing_core())
-        raise RunnerError(f"Missing required tools: {missing}")
+    volume = _validate_mount_request(req, deps)
 
-    volume = req.volume.strip()
-    if not volume:
-        raise RunnerError("Volume path is empty")
-    if not Path(volume).exists():
-        raise RunnerError(f"Volume path does not exist: {volume}")
-
-    if req.readonly is False and not deps.can_write:
-        raise RunnerError(
-            "Read/write requested but ntfs-3g was not found. "
-            "Install ntfs-3g (and a FUSE backend) or leave Read-only checked."
-        )
-
-    if req.method == UnlockMethod.BEK_FILE:
-        bek = Path(req.secret).expanduser()
-        if not bek.is_file():
-            raise RunnerError(f"BEK file not found: {bek}")
-    elif not req.secret:
-        raise RunnerError("Password / recovery password is empty")
-
-    existing = load_session()
-    if existing is not None:
-        raise RunnerError(
-            "A session is already active. Click Unmount before mounting again.\n"
-            f"NTFS mount: {existing.ntfs_mount}"
-        )
-
-    fuse_mount = Path(tempfile.mkdtemp(prefix="dislocker-ui-", dir="/tmp"))
+    # Prefer the process temp dir (private on macOS) over world-writable /tmp.
+    fuse_mount = Path(tempfile.mkdtemp(prefix="dislocker-ui-"))
     ntfs_mount = _allocate_volume_path(req.volume_label)
     fuse_proc: subprocess.Popen[str] | None = None
     raw_disk: str | None = None
@@ -123,20 +97,7 @@ def mount_volume(
         raw_disk = _hdiutil_attach(deps, dislocker_file, log)
         log(f"Attached as {raw_disk}")
 
-        ntfs_mount.mkdir(parents=True, exist_ok=True)
-        used_ntfs3g = False
-        if req.readonly:
-            log(f"Mounting NTFS read-only at {ntfs_mount}…")
-            _run(
-                [deps.mount, "-t", "ntfs", "-o", "rdonly", raw_disk, str(ntfs_mount)],
-                log,
-            )
-        else:
-            assert deps.ntfs3g
-            log(f"Mounting NTFS read/write via ntfs-3g at {ntfs_mount}…")
-            _run([deps.ntfs3g, raw_disk, str(ntfs_mount)], log)
-            used_ntfs3g = True
-
+        used_ntfs3g = _mount_ntfs(deps, req, raw_disk, ntfs_mount, log)
         session = MountSession(
             volume=volume,
             fuse_mount=str(fuse_mount),
@@ -167,50 +128,140 @@ def unmount_volume(deps: DepsStatus, log: LogFn) -> None:
         raise RunnerError("No active session found to unmount")
 
     errors: list[str] = []
-
-    log(f"Unmounting NTFS at {session.ntfs_mount}…")
-    try:
-        _run([deps.umount, session.ntfs_mount], log, check=True)
-    except RunnerError as exc:
-        errors.append(str(exc))
-        try:
-            _run(["diskutil", "unmount", "force", session.ntfs_mount], log, check=True)
-        except RunnerError as exc2:
-            errors.append(str(exc2))
-
-    log(f"Detaching {session.raw_disk}…")
-    try:
-        _run([deps.hdiutil, "detach", session.raw_disk], log, check=True)
-    except RunnerError as exc:
-        errors.append(str(exc))
-        try:
-            _run([deps.hdiutil, "detach", "-force", session.raw_disk], log, check=True)
-        except RunnerError as exc2:
-            errors.append(str(exc2))
-
-    log(f"Unmounting FUSE at {session.fuse_mount}…")
-    try:
-        _run([deps.umount, session.fuse_mount], log, check=True)
-    except RunnerError as exc:
-        errors.append(str(exc))
-
-    fuse_path = Path(session.fuse_mount)
-    if fuse_path.is_dir():
-        shutil.rmtree(fuse_path, ignore_errors=True)
-
-    ntfs_path = Path(session.ntfs_mount)
-    if ntfs_path.is_dir():
-        try:
-            if not any(ntfs_path.iterdir()):
-                ntfs_path.rmdir()
-        except OSError:
-            pass
+    errors.extend(_unmount_ntfs(deps, session, log))
+    errors.extend(_detach_raw_disk(deps, session, log))
+    errors.extend(_unmount_fuse(deps, session, log))
+    _remove_fuse_dir(session.fuse_mount)
+    _remove_empty_ntfs_dir(session.ntfs_mount)
 
     clear_session()
     if errors:
         log("Unmount finished with warnings:\n" + "\n".join(errors))
     else:
         log("Unmounted successfully")
+
+
+def _validate_mount_request(req: MountRequest, deps: DepsStatus) -> str:
+    """Validate mount inputs; return the stripped volume path."""
+    if not deps.core_ok:
+        missing = ", ".join(deps.missing_core())
+        raise RunnerError(f"Missing required tools: {missing}")
+
+    volume = req.volume.strip()
+    if not volume:
+        raise RunnerError("Volume path is empty")
+    if not Path(volume).exists():
+        raise RunnerError(f"Volume path does not exist: {volume}")
+
+    if req.readonly is False and not deps.can_write:
+        raise RunnerError(
+            "Read/write requested but ntfs-3g was not found. "
+            "Install ntfs-3g (and a FUSE backend) or leave Read-only checked."
+        )
+
+    if req.method == UnlockMethod.BEK_FILE:
+        bek = Path(req.secret).expanduser()
+        if not bek.is_file():
+            raise RunnerError(f"BEK file not found: {bek}")
+    elif not req.secret:
+        raise RunnerError("Password / recovery password is empty")
+
+    existing = load_session()
+    if existing is not None:
+        raise RunnerError(
+            "A session is already active. Click Unmount before mounting again.\n"
+            f"NTFS mount: {existing.ntfs_mount}"
+        )
+    return volume
+
+
+def _mount_ntfs(
+    deps: DepsStatus,
+    req: MountRequest,
+    raw_disk: str,
+    ntfs_mount: Path,
+    log: LogFn,
+) -> bool:
+    """Mount the attached raw disk; return True when ntfs-3g was used."""
+    ntfs_mount.mkdir(parents=True, exist_ok=True)
+    if req.readonly:
+        log(f"Mounting NTFS read-only at {ntfs_mount}…")
+        _run(
+            [deps.mount, "-t", "ntfs", "-o", "rdonly", raw_disk, str(ntfs_mount)],
+            log,
+        )
+        return False
+    assert deps.ntfs3g
+    log(f"Mounting NTFS read/write via ntfs-3g at {ntfs_mount}…")
+    _run([deps.ntfs3g, raw_disk, str(ntfs_mount)], log)
+    return True
+
+
+def _run_with_fallback(
+    primary: list[str],
+    fallback: list[str],
+    log: LogFn,
+) -> list[str]:
+    """Try *primary*, then *fallback* on failure; return any error messages."""
+    errors: list[str] = []
+    try:
+        _run(primary, log, check=True)
+    except RunnerError as exc:
+        errors.append(str(exc))
+        try:
+            _run(fallback, log, check=True)
+        except RunnerError as exc2:
+            errors.append(str(exc2))
+    return errors
+
+
+def _unmount_ntfs(deps: DepsStatus, session: MountSession, log: LogFn) -> list[str]:
+    """Unmount the NTFS volume, forcing via diskutil if needed."""
+    log(f"Unmounting NTFS at {session.ntfs_mount}…")
+    return _run_with_fallback(
+        [deps.umount, session.ntfs_mount],
+        ["diskutil", "unmount", "force", session.ntfs_mount],
+        log,
+    )
+
+
+def _detach_raw_disk(deps: DepsStatus, session: MountSession, log: LogFn) -> list[str]:
+    """Detach the hdiutil raw disk, forcing if needed."""
+    log(f"Detaching {session.raw_disk}…")
+    return _run_with_fallback(
+        [deps.hdiutil, "detach", session.raw_disk],
+        [deps.hdiutil, "detach", "-force", session.raw_disk],
+        log,
+    )
+
+
+def _unmount_fuse(deps: DepsStatus, session: MountSession, log: LogFn) -> list[str]:
+    """Unmount the dislocker FUSE mount point."""
+    log(f"Unmounting FUSE at {session.fuse_mount}…")
+    try:
+        _run([deps.umount, session.fuse_mount], log, check=True)
+        return []
+    except RunnerError as exc:
+        return [str(exc)]
+
+
+def _remove_fuse_dir(fuse_mount: str) -> None:
+    """Remove the temporary FUSE mount directory if present."""
+    fuse_path = Path(fuse_mount)
+    if fuse_path.is_dir():
+        shutil.rmtree(fuse_path, ignore_errors=True)
+
+
+def _remove_empty_ntfs_dir(ntfs_mount: str) -> None:
+    """Remove an empty /Volumes mount-point directory left after unmount."""
+    ntfs_path = Path(ntfs_mount)
+    if not ntfs_path.is_dir():
+        return
+    try:
+        if not any(ntfs_path.iterdir()):
+            ntfs_path.rmdir()
+    except OSError:
+        pass
 
 
 def _build_dislocker_cmd(
