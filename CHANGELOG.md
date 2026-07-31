@@ -21,6 +21,7 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
 - Source file hard line-count cap is **800** (soft warning remains 600).
 - CI GitHub Actions pinned to full commit SHAs (checkout / setup-python).
+- Semgrep CI container pinned by digest (`1.170.0`).
 
 ## [0.1.2] - 2026-07-30
 

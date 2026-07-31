@@ -24,6 +24,8 @@ Version numbers match `VERSION` / SemVer with the public changelog.
 
 - Pin `actions/checkout` and `actions/setup-python` to full commit SHAs in CI
   (Semgrep `github-actions-mutable-action-tag`).
+- Pin the Semgrep CI container image by digest (`semgrep/semgrep@sha256:…` /
+  1.170.0).
 
 ### Fixed
 

@@ -70,7 +70,8 @@ jobs:
     name: semgrep
     runs-on: ubuntu-latest
     container:
-      image: semgrep/semgrep
+      # Pin by digest (mutable tags / zizmor unpinned-images).
+      image: semgrep/semgrep@sha256:c98f8829eea377274ee4b10656458b078b88232469b2ff913f091c2317347c9d # 1.170.0
     if: github.actor != 'dependabot[bot]'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
