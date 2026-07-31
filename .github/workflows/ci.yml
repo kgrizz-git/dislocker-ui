@@ -43,8 +43,11 @@ jobs:
       - name: File line-count check
         run: python3 hooks/check_file_size.py
 
+      - name: Install Xvfb for headless tkinter tests
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+
       - name: Pytest with coverage
-        run: pytest --cov --cov-report=term-missing
+        run: xvfb-run -a pytest --cov --cov-report=term-missing
 
   audit:
     name: pip-audit
