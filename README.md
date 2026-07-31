@@ -4,7 +4,7 @@ Simple macOS GUI frontend for [dislocker](https://github.com/Aorimn/dislocker).
 It does **not** fork or reimplement BitLocker crypto — it shells out to an
 installed `dislocker-fuse` and then attaches/mounts the resulting NTFS image.
 
-**Version:** see `VERSION` (currently 0.1.1).
+**Version:** see `VERSION` (currently 0.1.2).
 
 ## What it does
 
@@ -174,5 +174,23 @@ CI on GitHub runs `compileall`, Ruff, absolute home-path check, and gitleaks.
 
 ## License
 
-This frontend is for personal use. Dislocker itself is GPL-2.0-or-later; respect
-its license when redistributing anything that bundles or tightly couples to it.
+**dislocker-ui** is free software: you can redistribute it and/or modify it under
+the terms of the [GNU General Public License](LICENSE) as published by the Free
+Software Foundation, either **version 3** of the License, or (at your option)
+any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+SPDX: `GPL-3.0-or-later`. Commercial use is allowed; copyleft applies when you
+redistribute this program or a modified version (you must provide source under
+the same license terms).
+
+### Related tools (not covered by this license)
+
+This project **does not** bundle [dislocker](https://github.com/Aorimn/dislocker),
+macFUSE/FUSE-T, or `ntfs-3g`. Those remain separate system dependencies under
+their own licenses (dislocker is typically **GPL-2.0-or-later**). Using
+dislocker-ui does not grant you rights to those projects. If you redistribute a
+package that includes their binaries or sources, follow *their* license terms.

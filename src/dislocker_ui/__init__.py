@@ -1,6 +1,15 @@
 """
 dislocker-ui — macOS GUI frontend for an installed dislocker toolchain.
 
+Copyright (C) 2026 the dislocker-ui contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+SPDX-License-Identifier: GPL-3.0-or-later
+
 Overall purpose:
   Provide a small personal UI that unlocks BitLocker volumes via dislocker-fuse,
   attaches the virtual NTFS image, and mounts it for Finder access.

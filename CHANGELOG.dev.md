@@ -6,6 +6,19 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.1.2] - 2026-07-30
+
+### Changed
+
+- Project license set to GPL-3.0-or-later (`LICENSE`, README, `pyproject.toml`,
+  package header). Replaced vague “personal use” wording.
+
+### Fixed
+
+- Add `tests/.gitkeep` so the empty tests tree exists in CI for Ruff path args.
+- `pyproject.toml`: PEP 639 SPDX `license` string + `license-files`, require
+  `setuptools>=77` (CodeRabbit nit).
+
 ## [0.1.1] - 2026-07-30
 
 ### Added

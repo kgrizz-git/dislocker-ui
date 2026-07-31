@@ -4,7 +4,7 @@
 # Optional developer tooling: pip install -e ".[dev]" or use pre-commit.
 
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -13,7 +13,8 @@ dynamic = ["version"]
 description = "macOS GUI frontend for an installed dislocker (BitLocker) toolchain"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Personal use; see README (dislocker is GPL-2.0-or-later)" }
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 dependencies = []
 
 [project.optional-dependencies]
