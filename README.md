@@ -185,7 +185,9 @@ No `SONAR_TOKEN` is required for the default setup:
    `kgrizz-git/dislocker-ui` (public / open-source plan is fine).
 2. In the project: **Administration → Analysis Method → Automatic Analysis** → on.
 3. Optional: keep [`.sonarcloud.properties`](.sonarcloud.properties) for source/test
-   paths (already in this repo).
+   paths (already in this repo). Set path exclusions in the SonarCloud UI
+   (**Administration → General Settings → Analysis Scope**); Automatic Analysis
+   does not support wildcard `sonar.exclusions` in `.sonarcloud.properties`.
 
 Do **not** also run a CI-based Sonar scan while Automatic Analysis is enabled
 (SonarCloud rejects that combo). Coverage upload needs CI-based analysis later

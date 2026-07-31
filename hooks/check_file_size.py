@@ -45,8 +45,8 @@ DOC_HARD_LINE_CAP = int(os.getenv("POLICY_DOC_HARD_LINE_CAP", "2000"))
 MAX_BYTES = int(os.getenv("POLICY_MAX_BYTES", str(500 * 1024)))
 WARN_AS_ERROR = os.getenv("POLICY_WARN_AS_ERROR", "0") == "1"
 
-SOURCE_EXTS = {".py", ".sh", ".bash", ".zsh"}
-DOC_EXTS = {".md", ".rst", ".txt", ".toml", ".yaml", ".yml"}
+SOURCE_EXTS = {".py", ".sh", ".bash", ".zsh", ".toml"}
+DOC_EXTS = {".md", ".rst", ".txt", ".yaml", ".yml"}
 OVERRIDE_RE = re.compile(r"policy:file-size\s+allow=(\d+)", re.IGNORECASE)
 
 IGNORE_FRAGMENTS = (
