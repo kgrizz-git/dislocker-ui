@@ -11,8 +11,8 @@ Version numbers match `VERSION` / SemVer with the public changelog.
 ### Added
 
 - `SECURITY.md`, `CONTRIBUTING.md`, `.github/CODEOWNERS`, `.github/dependabot.yml`
-  (pip + GitHub Actions weekly), issue template `config.yml` with security /
-  contributing contact links.
+  (pip + GitHub Actions weekly, `cooldown.default-days: 7`), issue template
+  `config.yml` with security / contributing contact links.
 
 ## [0.1.4] - 2026-07-31
 
