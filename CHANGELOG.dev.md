@@ -6,6 +6,34 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.1.3] - 2026-07-30
+
+### Added
+
+- pytest suite: `tests/test_session.py`, `tests/test_deps.py`, `tests/test_disks.py`.
+- Ruff mccabe complexity (`C90`, max 12).
+- `hooks/check_file_size.py` on pre-commit and pre-push (soft 600 / hard **800**).
+- CI: pytest + coverage (`fail_under=70`, omit gui/runner/`__main__`), `pip-audit`,
+  Semgrep (`p/owasp-top-ten` + `p/python`); `.semgrepignore` for scratch/caches.
+- SonarCloud Automatic Analysis config via `.sonarcloud.properties` (no CI token;
+  enable Automatic Analysis in the SonarCloud project UI after importing the repo).
+- Dev extras: `pytest`, `pytest-cov`, `pip-audit`.
+- Unit tests for `hooks/check_file_size.py`.
+
+### Changed
+
+- Pin `actions/checkout` and `actions/setup-python` to full commit SHAs in CI
+  (Semgrep `github-actions-mutable-action-tag`).
+- Pin the Semgrep CI container image by digest (`semgrep/semgrep@sha256:…` /
+  1.170.0).
+
+### Fixed
+
+- CodeRabbit follow-ups: `persist-credentials: false` on CI checkouts; drop
+  unsupported Automatic Analysis wildcard exclusions; `.toml` uses source
+  line-caps; changelog test paths.
+- Split composite assert in `tests/test_check_file_size.py` (Sonar `python:S9073`).
+
 ## [0.1.2] - 2026-07-30
 
 ### Changed

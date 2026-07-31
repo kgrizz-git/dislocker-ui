@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.1.3] - 2026-07-30
+
+### Added
+
+- Unit tests for `session`, `deps`, and `disks` (pytest).
+- Coverage gate on core modules (GUI/runner omitted for now); CI `pip-audit` and
+  Semgrep (OWASP Top 10 + Python) on the `[dev]` install / scan set; file
+  line-count and complexity (Ruff C901) checks.
+- SonarCloud Automatic Analysis support (`.sonarcloud.properties`).
+
+### Changed
+
+- Source file hard line-count cap is **800** (soft warning remains 600).
+- CI GitHub Actions pinned to full commit SHAs (checkout / setup-python).
+- Semgrep CI container pinned by digest (`1.170.0`).
+
 ## [0.1.2] - 2026-07-30
 
 ### Changed

@@ -4,7 +4,7 @@ Simple macOS GUI frontend for [dislocker](https://github.com/Aorimn/dislocker).
 It does **not** fork or reimplement BitLocker crypto — it shells out to an
 installed `dislocker-fuse` and then attaches/mounts the resulting NTFS image.
 
-**Version:** see `VERSION` (currently 0.1.2).
+**Version:** see `VERSION` (currently 0.1.3).
 
 ## What it does
 
@@ -153,7 +153,8 @@ tmp/                # local scratch (gitignored)
 run.sh              # launcher
 pyproject.toml      # packaging + Ruff config
 .pre-commit-config.yaml  # optional local hooks (incl. pre-push)
-hooks/              # local policy scripts (absolute-path check)
+hooks/              # local policy scripts (absolute-path / line-count)
+.sonarcloud.properties   # SonarCloud Automatic Analysis scope
 .github/            # CI + issue/PR templates
 ```
 
@@ -162,15 +163,36 @@ hooks/              # local policy scripts (absolute-path check)
 Runtime needs no pip packages. Optional lint/hooks:
 
 ```bash
-pip install -e ".[dev]"   # ruff + pre-commit
+pip install -e ".[dev]"   # ruff, pre-commit, pytest, pip-audit
 ruff check src tests hooks
 ruff format src tests hooks
+pytest --cov --cov-report=term-missing
 python3 hooks/check_absolute_paths.py
+python3 hooks/check_file_size.py
+pip-audit                 # prefer a clean venv, not a shared global env
 pre-commit install -t pre-commit -t pre-push
 pre-commit run --all-files
 ```
 
-CI on GitHub runs `compileall`, Ruff, absolute home-path check, and gitleaks.
+CI on GitHub runs compileall, Ruff (incl. complexity), absolute-path and
+line-count checks, pytest with coverage, pip-audit, Semgrep (OWASP Top 10 +
+Python rules), and gitleaks.
+
+### SonarCloud (Automatic Analysis)
+
+No `SONAR_TOKEN` is required for the default setup:
+
+1. Sign in at [SonarQube Cloud](https://sonarcloud.io) with GitHub and import
+   `kgrizz-git/dislocker-ui` (public / open-source plan is fine).
+2. In the project: **Administration → Analysis Method → Automatic Analysis** → on.
+3. Optional: keep [`.sonarcloud.properties`](.sonarcloud.properties) for source/test
+   paths (already in this repo). Set path exclusions in the SonarCloud UI
+   (**Administration → General Settings → Analysis Scope**); Automatic Analysis
+   does not support wildcard `sonar.exclusions` in `.sonarcloud.properties`.
+
+Do **not** also run a CI-based Sonar scan while Automatic Analysis is enabled
+(SonarCloud rejects that combo). Coverage upload needs CI-based analysis later
+if you want it.
 
 ## License
 

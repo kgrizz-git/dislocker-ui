@@ -39,6 +39,26 @@ repos:
         description: >-
           Full-tree home-path scan before push (same script as pre-commit).
 
+      - id: check-file-size
+        name: "policy: file line count"
+        entry: python3 hooks/check_file_size.py
+        language: system
+        types: [file]
+        stages: [pre-commit]
+        description: >-
+          Soft 600 / hard 800 lines for source; higher caps for docs.
+          See hooks/check_file_size.py.
+
+      - id: check-file-size-push
+        name: "policy: file line count (pre-push)"
+        entry: python3 hooks/check_file_size.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+        description: >-
+          Full-tree line-count scan before push.
+
   # Secret scanning
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.21.2
