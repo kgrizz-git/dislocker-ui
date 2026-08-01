@@ -72,8 +72,11 @@ def main(argv: list[str] | None = None) -> int:
         payload = _load_and_unlink_request(args.request)
         _validate_request(payload, expected_action=args.action)
         log_fp = _open_log(Path(payload["log_path"]), owner_uid=int(payload["uid"]))
+        import time
+
         log_fp.write(
-            f"audit action={payload['action']} uid={payload['uid']} "
+            f"audit ts={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} "
+            f"action={payload['action']} uid={payload['uid']} "
             f"volume={payload.get('volume', '')}\n"
         )
         log_fp.flush()
