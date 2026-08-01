@@ -11,6 +11,7 @@ Requirements:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -89,7 +90,16 @@ def test_resolve_mount_owner_fallback_warns() -> None:
     assert any("uid=0/gid=0" in line for line in logs)
 
 
-def test_mount_ntfs_always_uses_ntfs3g(tmp_path: Path) -> None:
+def test_assert_mount_owner_mismatch(tmp_path: Path) -> None:
+    """Ownership assert raises when mountpoint uid does not match."""
+    from dislocker_ui.ntfs_mount import assert_mount_owner
+    from dislocker_ui.runner import RunnerError
+
+    mnt = tmp_path / "mnt"
+    mnt.mkdir()
+    with pytest.raises(RunnerError, match="ownership mismatch"):
+        assert_mount_owner(mnt, uid=os.getuid() + 1, gid=None, log=lambda _m: None)
+
     """_mount_ntfs invokes ntfs-3g with assembled -o options (never kernel mount)."""
     req = MountRequest(
         volume="/dev/disk2s1",

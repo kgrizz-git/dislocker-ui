@@ -243,6 +243,41 @@ def test_run_elevated_mount_cancel_unlinks_request(tmp_path: Path) -> None:
     assert not created[0].exists()
 
 
+def test_prepare_elevation_paths_creates_0600_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """prepare_elevation_paths returns session path and a mode-0600 log file."""
+    from dislocker_ui.elevate import prepare_elevation_paths
+
+    support = tmp_path / "Application Support" / "dislocker-ui"
+    support.mkdir(parents=True)
+    monkeypatch.setattr(
+        "dislocker_ui.session.default_session_path",
+        lambda: support / "active_session.json",
+    )
+
+    def _safe(path: Path, *, label: str) -> None:
+        return None
+
+    with patch("dislocker_ui.elevate.assert_safe_path_for_elevation", side_effect=_safe):
+        session_path, log_path = prepare_elevation_paths()
+    assert session_path.name == "active_session.json"
+    assert log_path.is_file()
+    assert oct(log_path.stat().st_mode & 0o777) == "0o600"
+    log_path.unlink(missing_ok=True)
+
+
+def test_assert_safe_path_rejects_world_writable(tmp_path: Path) -> None:
+    """Group/world-writable dirs refuse elevation."""
+    from dislocker_ui.elevate import assert_safe_path_for_elevation
+
+    d = tmp_path / "wide"
+    d.mkdir()
+    d.chmod(0o777)
+    with pytest.raises(RunnerError, match="writable"):
+        assert_safe_path_for_elevation(d, label="test")
+
+
 def test_request_json_secret_is_last_key(tmp_path: Path) -> None:
     """Secret is the last key in the written request JSON object."""
     from dislocker_ui.elevate import _write_request
@@ -266,7 +301,6 @@ def test_request_json_secret_is_last_key(tmp_path: Path) -> None:
         assert list(data.keys())[-1] == "secret"
         assert data["secret"] == "last-please"
         assert data["action"] == "mount"
-        assert "sekrit" not in text or data["secret"] == "last-please"
         assert oct(path.stat().st_mode & 0o777) == "0o600"
     finally:
         path.unlink(missing_ok=True)
