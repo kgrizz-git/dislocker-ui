@@ -19,6 +19,7 @@ import pytest
 from dislocker_ui.deps import DepsStatus
 from dislocker_ui.runner import (
     MountRequest,
+    RunnerError,
     UnlockMethod,
     _canonicalize_bek_secret,
     mount_volume,
@@ -48,6 +49,7 @@ def test_mount_dispatches_to_elevate_when_needed() -> None:
     session = MagicMock(spec=MountSession)
     with (
         patch("dislocker_ui.elevate.needs_elevation", return_value=True),
+        patch("dislocker_ui.runner.load_session", return_value=None),
         patch(
             "dislocker_ui.elevate.prepare_elevation_paths",
             return_value=(Path("/tmp/s.json"), Path("/tmp/l.log")),
@@ -59,6 +61,36 @@ def test_mount_dispatches_to_elevate_when_needed() -> None:
     assert result is session
     elev.assert_called_once()
     inproc.assert_not_called()
+
+
+def test_mount_rejects_active_session_before_elevating() -> None:
+    """An active session raises before any admin prompt is requested."""
+    req = MountRequest(
+        volume="/dev/disk2s1",
+        method=UnlockMethod.USER_PASSWORD,
+        secret="x",
+        readonly=True,
+    )
+    existing = MountSession(
+        volume="/dev/disk2s1",
+        fuse_mount="/tmp/f",
+        dislocker_file="/tmp/f/dislocker-file",
+        raw_disk="/dev/disk9",
+        ntfs_mount="/Volumes/X",
+        readonly=True,
+        used_ntfs3g=True,
+        elevated=True,
+    )
+    with (
+        patch("dislocker_ui.elevate.needs_elevation", return_value=True),
+        patch("dislocker_ui.runner.load_session", return_value=existing),
+        patch("dislocker_ui.elevate.run_elevated_mount") as elev,
+        patch("dislocker_ui.elevate.prepare_elevation_paths") as prep,
+        pytest.raises(RunnerError, match="already active"),
+    ):
+        mount_volume(req, _deps(), lambda _m: None)
+    elev.assert_not_called()
+    prep.assert_not_called()
 
 
 def test_mount_in_process_when_already_root() -> None:

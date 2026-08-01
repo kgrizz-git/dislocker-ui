@@ -82,6 +82,14 @@ def mount_volume(
     from dislocker_ui.elevate import needs_elevation, prepare_elevation_paths, run_elevated_mount
 
     if not elevated and needs_elevation():
+        # Reject an already-active session here, before prompting for admin
+        # credentials — the child would reject it anyway (exit 3).
+        existing = load_session(session_path)
+        if existing is not None:
+            raise RunnerError(
+                "A session is already active. Click Unmount before mounting again.\n"
+                f"NTFS mount: {existing.ntfs_mount}"
+            )
         sess_path, log_path = prepare_elevation_paths()
         return run_elevated_mount(
             req,

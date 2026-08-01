@@ -64,17 +64,6 @@ def needs_elevation() -> bool:
     return sys.platform == "darwin" and os.geteuid() != 0
 
 
-def volume_needs_elevation(volume: str) -> bool:
-    """
-    UI helper: True when not root and the volume path is not readable.
-
-    Does not decide whether to elevate the pipeline — use needs_elevation().
-    """
-    if os.geteuid() == 0:
-        return False
-    return not os.access(volume, os.R_OK)
-
-
 def run_elevated_mount(
     req: MountRequest,
     deps: DepsStatus,
@@ -99,16 +88,16 @@ def run_elevated_mount(
     )
     try:
         _run_osascript(request_path, action="mount", log=log)
+        session = load_session(session_path)
+        if session is None:
+            raise RunnerError(
+                "Elevated mount reported success but session file is missing or invalid.\n"
+                + _tail_log(log_path)
+            )
+        return session
     finally:
         _unlink_quiet(request_path)
-
-    session = load_session(session_path)
-    if session is None:
-        raise RunnerError(
-            "Elevated mount reported success but session file is missing or invalid.\n"
-            + _tail_log(log_path)
-        )
-    return session
+        _unlink_quiet(log_path)
 
 
 def run_elevated_unmount(
@@ -134,6 +123,7 @@ def run_elevated_unmount(
         _run_osascript(request_path, action="unmount", log=log)
     finally:
         _unlink_quiet(request_path)
+        _unlink_quiet(log_path)
 
 
 def prepare_elevation_paths() -> tuple[Path, Path]:
@@ -146,8 +136,12 @@ def prepare_elevation_paths() -> tuple[Path, Path]:
 
     session_path = default_session_path()
     assert_safe_path_for_elevation(session_path.parent, label="Application Support")
-    src_root = Path(__file__).resolve().parent.parent
+    package_dir = Path(__file__).resolve().parent
+    src_root = package_dir.parent
+    # Root executes these modules via PYTHONPATH; guard both the package dir it
+    # imports from and its parent against symlink/world-writable tampering.
     assert_safe_path_for_elevation(src_root, label="package src")
+    assert_safe_path_for_elevation(package_dir, label="package dir")
     fd, name = tempfile.mkstemp(prefix="dislocker-ui-log-", suffix=".log")
     try:
         os.fchmod(fd, 0o600)
@@ -247,26 +241,30 @@ def classify_osascript_failure(stderr: str, *, log_path: Path | None = None) -> 
     text = (stderr or "").strip()
     code = _parse_error_number(text)
     lower = text.lower()
+    tail = _tail_log(log_path) if log_path is not None else ""
+    detail = text or "(no osascript stderr)"
 
-    if code == -128 or "user canceled" in lower or "user cancelled" in lower:
+    # The child's shell exit status is authoritative — classify on it first, so a
+    # child failure whose stderr merely contains "timed out"/"canceled" is not
+    # misread as an auth cancel/timeout.
+    if code == -128:
         return ElevationCancelled("Administrator authorization was cancelled.")
-
-    if (
-        code == -1712
-        or "timed out" in lower
-        or "appleevent timed out" in lower
-        or "timeout of" in lower
-    ):
+    if code == -1712:
         return ElevationTimedOut(
             "Administrator authorization timed out. Try again and complete the prompt promptly."
         )
-
-    tail = _tail_log(log_path) if log_path is not None else ""
-    detail = text or "(no osascript stderr)"
     if code in (2, 3, 4):
         return RunnerError(
             f"Elevated { {2: 'request validation', 3: 'mount/unmount', 4: 'unexpected'}[code] } "
             f"failed (exit {code}).\n{detail}\n{tail}".strip()
+        )
+
+    # No recognizable error number — fall back to text heuristics.
+    if "user canceled" in lower or "user cancelled" in lower:
+        return ElevationCancelled("Administrator authorization was cancelled.")
+    if "timed out" in lower or "appleevent timed out" in lower or "timeout of" in lower:
+        return ElevationTimedOut(
+            "Administrator authorization timed out. Try again and complete the prompt promptly."
         )
     return RunnerError(f"Administrator elevation failed.\n{detail}\n{tail}".strip())
 

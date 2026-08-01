@@ -24,6 +24,7 @@ from dislocker_ui.privileged import (
     EXIT_UNEXPECTED,
     EXIT_VALIDATION,
     _deps_from_payload,
+    _format_unexpected,
     _open_log,
     _validate_request,
     main,
@@ -190,3 +191,15 @@ def test_main_never_calls_discover_deps(tmp_path: Path) -> None:
     ):
         assert main(["mount", "--request", str(req)]) == EXIT_OK
     discover.assert_not_called()
+
+
+def test_format_unexpected_redacts_secret() -> None:
+    """A traceback carrying a password argv is fully scrubbed, not just prefixed."""
+    try:
+        raise RuntimeError("boom while running --user-password=hunter2 --recovery-password=ABC-123")
+    except RuntimeError as exc:
+        out = _format_unexpected(exc)
+    assert "hunter2" not in out
+    assert "ABC-123" not in out
+    assert "--user-password=***" in out
+    assert "--recovery-password=***" in out

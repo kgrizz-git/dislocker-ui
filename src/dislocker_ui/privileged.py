@@ -26,6 +26,7 @@ import argparse
 import contextlib
 import json
 import os
+import re
 import stat
 import sys
 import traceback
@@ -37,7 +38,6 @@ from dislocker_ui.runner import (
     MountRequest,
     RunnerError,
     UnlockMethod,
-    _redact_cmd,
     mount_volume,
     unmount_volume,
 )
@@ -269,12 +269,8 @@ def _append_log_best_effort(log_fp: TextIO | None, message: str) -> None:
 def _format_unexpected(exc: BaseException) -> str:
     """Format traceback with password-like argv fragments redacted."""
     tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-    for pattern in ("--user-password=", "--recovery-password="):
-        if pattern in tb:
-            tb = tb.replace(pattern, pattern + "***")
-    # Ensure _redact_cmd remains imported and available for structured logging.
-    _ = _redact_cmd(["dislocker-fuse", "--user-password=secret"])
-    return f"unexpected error: {exc}\n{tb}"
+    composed = f"unexpected error: {exc}\n{tb}"
+    return re.sub(r"(--(?:user|recovery)-password=)\S*", r"\1***", composed)
 
 
 if __name__ == "__main__":

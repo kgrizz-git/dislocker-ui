@@ -29,7 +29,6 @@ from dislocker_ui.elevate import (
     run_elevated_mount,
     serialize_deps,
     validate_volume_path,
-    volume_needs_elevation,
 )
 from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod
 from dislocker_ui.session import MountSession, save_session
@@ -66,17 +65,6 @@ def test_needs_elevation_false_when_root_or_non_darwin() -> None:
         patch("dislocker_ui.elevate.os.geteuid", return_value=501),
     ):
         assert needs_elevation() is False
-
-
-def test_volume_needs_elevation_respects_access() -> None:
-    """UI helper is true only when not root and volume is unreadable."""
-    with (
-        patch("dislocker_ui.elevate.os.geteuid", return_value=501),
-        patch("dislocker_ui.elevate.os.access", return_value=False),
-    ):
-        assert volume_needs_elevation("/dev/disk2s1") is True
-    with patch("dislocker_ui.elevate.os.geteuid", return_value=0):
-        assert volume_needs_elevation("/dev/disk2s1") is False
 
 
 def test_quoting_handles_spaces_quotes_dollar_backticks(tmp_path: Path) -> None:
