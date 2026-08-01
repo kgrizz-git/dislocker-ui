@@ -151,8 +151,12 @@ carefully for your use case.
 ```
 src/dislocker_ui/   # application package
 tests/              # test helpers / scripts
+plans/              # active implementation plans (archive/ for finished)
+TO_DO.md            # open work only (remove items when done)
+CHANGELOG.md        # user-visible product changes
+CHANGELOG.dev.md    # harness / CI / docs-only notes
 tmp/                # local scratch (gitignored)
-.context/           # agent/dev scratch (gitignored)
+.context/           # disposable agent scratch (gitignored)
 run.sh              # launcher
 pyproject.toml      # packaging + Ruff config
 .pre-commit-config.yaml  # optional local hooks (incl. pre-push)

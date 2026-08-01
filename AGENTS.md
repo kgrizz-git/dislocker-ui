@@ -31,6 +31,24 @@ BitLocker cryptography and should not vendor dislocker sources.
 
 Prefer extending these modules over adding a second parallel flow.
 
+## Plans, TO_DO, and changelogs
+
+| File / folder | Purpose |
+|---------------|---------|
+| [`TO_DO.md`](TO_DO.md) | **Open work only.** Delete items when done; do not keep completed checkboxes. |
+| [`plans/`](plans/) | Active implementation plans (tracked). Index: [`plans/README.md`](plans/README.md). |
+| [`plans/archive/`](plans/archive/) | Finished or abandoned plans (history). |
+| [`CHANGELOG.md`](CHANGELOG.md) | User-visible product changes; bump `VERSION` (semver) with it. |
+| [`CHANGELOG.dev.md`](CHANGELOG.dev.md) | Harness / CI / docs-only notes (same version lineage). |
+| `.context/` | Gitignored scratch only — not a substitute for tracked plans. |
+
+Workflow for agents:
+
+1. Multi-step work → write/update a plan under `plans/` and mirror open items in `TO_DO.md`.
+2. Finish an item → **remove it from `TO_DO.md`** (and check it off in the plan if useful).
+3. Finish a whole plan → move `plans/<name>.md` to `plans/archive/` (prefer `YYYY-MM-DD-<slug>.md`), clear its TO_DO section, update the right changelog.
+4. Never commit secrets, recovery keys, or machine-specific home paths in plans or TO_DO.
+
 ## Conventions
 
 - Python 3.10+, stdlib only for runtime unless the user explicitly adds a dependency.
@@ -43,7 +61,7 @@ Prefer extending these modules over adding a second parallel flow.
 - License: **GPL-3.0-or-later** (see `LICENSE`). Do not reintroduce “personal use
   only” license language. Dislocker / FUSE / ntfs-3g stay separate dependencies.
 - Put throwaway files under `tmp/` (gitignored). Put one-off test scripts under `tests/`.
-- Put agent scratch (plans, notes) under `.context/` (gitignored); never commit secrets there.
+- Put disposable agent scratch under `.context/` (gitignored); tracked plans belong in `plans/`.
 
 ## Commands
 
