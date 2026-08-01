@@ -66,14 +66,23 @@ def mount_volume(
     req: MountRequest,
     deps: DepsStatus,
     log: LogFn,
+    *,
+    session_path: Path | None = None,
+    uid: int | None = None,
+    gid: int | None = None,
+    elevated: bool = False,
 ) -> MountSession:
     """
     Unlock and mount a BitLocker volume for Finder access.
 
     Starts dislocker-fuse in the background, attaches the virtual NTFS file as
     a raw disk, then mounts it via ntfs-3g (read-only or read-write).
+
+    Optional *session_path* / *uid* / *gid* / *elevated* support the privileged
+    child path; the unprivileged facade (Task 3) may also pass them.
     """
-    volume = _validate_mount_request(req, deps)
+    req = _canonicalize_bek_secret(req)
+    volume = _validate_mount_request(req, deps, session_path=session_path)
 
     # Prefer the process temp dir (private on macOS) over world-writable /tmp.
     fuse_mount = Path(tempfile.mkdtemp(prefix="dislocker-ui-"))
@@ -99,7 +108,7 @@ def mount_volume(
         raw_disk = _hdiutil_attach(deps, dislocker_file, log)
         log(f"Attached as {raw_disk}")
 
-        used_ntfs3g = _mount_ntfs(deps, req, raw_disk, ntfs_mount, log)
+        used_ntfs3g = _mount_ntfs(deps, req, raw_disk, ntfs_mount, log, uid=uid, gid=gid)
         session = MountSession(
             volume=volume,
             fuse_mount=str(fuse_mount),
@@ -108,24 +117,36 @@ def mount_volume(
             ntfs_mount=str(ntfs_mount),
             readonly=req.readonly,
             used_ntfs3g=used_ntfs3g,
+            elevated=elevated,
         )
-        save_session(session)
+        save_session(session, session_path)
         log(f"Mounted successfully at {ntfs_mount}")
         return session
 
     except Exception:
         log("Mount failed — attempting cleanup…")
-        _best_effort_cleanup(fuse_mount, ntfs_mount, raw_disk=raw_disk, log=log)
+        _best_effort_cleanup(
+            fuse_mount,
+            ntfs_mount,
+            raw_disk=raw_disk,
+            log=log,
+            session_path=session_path,
+        )
         if fuse_proc is not None and fuse_proc.poll() is None:
             fuse_proc.terminate()
         raise
 
 
-def unmount_volume(deps: DepsStatus, log: LogFn) -> None:
+def unmount_volume(
+    deps: DepsStatus,
+    log: LogFn,
+    *,
+    session_path: Path | None = None,
+) -> None:
     """
     Reverse the last MountSession: umount NTFS, detach raw disk, umount FUSE.
     """
-    session = load_session()
+    session = load_session(session_path)
     if session is None:
         raise RunnerError("No active session found to unmount")
 
@@ -136,14 +157,40 @@ def unmount_volume(deps: DepsStatus, log: LogFn) -> None:
     _remove_fuse_dir(session.fuse_mount)
     _remove_empty_ntfs_dir(session.ntfs_mount)
 
-    clear_session()
+    clear_session(session_path)
     if errors:
         log("Unmount finished with warnings:\n" + "\n".join(errors))
     else:
         log("Unmounted successfully")
 
 
-def _validate_mount_request(req: MountRequest, deps: DepsStatus) -> str:
+def _canonicalize_bek_secret(req: MountRequest) -> MountRequest:
+    """
+    Resolve BEK paths before use.
+
+    Absolute paths (elevated child) are used as-is via resolve() without
+    expanduser, so root does not reinterpret ``~``. Relative/tilde paths are
+    expanded only in the unprivileged parent path.
+    """
+    if req.method != UnlockMethod.BEK_FILE:
+        return req
+    path = Path(req.secret)
+    resolved = str(path.resolve()) if path.is_absolute() else str(path.expanduser().resolve())
+    return MountRequest(
+        volume=req.volume,
+        method=req.method,
+        secret=resolved,
+        readonly=req.readonly,
+        volume_label=req.volume_label,
+    )
+
+
+def _validate_mount_request(
+    req: MountRequest,
+    deps: DepsStatus,
+    *,
+    session_path: Path | None = None,
+) -> str:
     """Validate mount inputs; return the stripped volume path."""
     if not deps.core_ok:
         missing = ", ".join(deps.missing_core())
@@ -156,13 +203,13 @@ def _validate_mount_request(req: MountRequest, deps: DepsStatus) -> str:
         raise RunnerError(f"Volume path does not exist: {volume}")
 
     if req.method == UnlockMethod.BEK_FILE:
-        bek = Path(req.secret).expanduser()
+        bek = Path(req.secret)
         if not bek.is_file():
             raise RunnerError(f"BEK file not found: {bek}")
     elif not req.secret:
         raise RunnerError("Password / recovery password is empty")
 
-    existing = load_session()
+    existing = load_session(session_path)
     if existing is not None:
         raise RunnerError(
             "A session is already active. Click Unmount before mounting again.\n"
@@ -362,7 +409,8 @@ def _build_dislocker_cmd(
     elif req.method == UnlockMethod.RECOVERY_PASSWORD:
         cmd.append(f"--recovery-password={req.secret}")
     elif req.method == UnlockMethod.BEK_FILE:
-        cmd.extend(["--bekfile", str(Path(req.secret).expanduser())])
+        # Parent/elevate canonicalize; do not expanduser here (root would expand ~ wrongly).
+        cmd.extend(["--bekfile", str(Path(req.secret))])
     else:
         raise RunnerError(f"Unsupported unlock method: {req.method}")
 
@@ -470,6 +518,8 @@ def _best_effort_cleanup(
     ntfs_mount: Path,
     raw_disk: str | None,
     log: LogFn,
+    *,
+    session_path: Path | None = None,
 ) -> None:
     """Attempt to undo partial mount state after a failure."""
     if ntfs_mount.exists():
@@ -483,5 +533,5 @@ def _best_effort_cleanup(
     if fuse_mount.exists():
         subprocess.run(["umount", str(fuse_mount)], check=False, capture_output=True)
         shutil.rmtree(fuse_mount, ignore_errors=True)
-    clear_session()
+    clear_session(session_path)
     log("Partial cleanup done")

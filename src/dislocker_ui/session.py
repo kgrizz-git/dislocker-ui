@@ -34,6 +34,7 @@ class MountSession:
     ntfs_mount: str
     readonly: bool
     used_ntfs3g: bool
+    elevated: bool = False
 
 
 def default_session_path() -> Path:
