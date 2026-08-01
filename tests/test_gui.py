@@ -345,6 +345,40 @@ def test_on_mount_error_shows_dialog(tk_root: tk.Tk, sync_threads: None, exc: Ex
     assert f"ERROR: {exc}" in app.log_text.get("1.0", tk.END)
 
 
+def test_on_mount_cancel_shows_info_dialog(tk_root: tk.Tk, sync_threads: None) -> None:
+    """ElevationCancelled uses a non-scary info dialog, not Mount failed."""
+    from dislocker_ui.elevate import ElevationCancelled
+
+    app = _build_app(tk_root)
+    with (
+        patch(
+            "dislocker_ui.gui.mount_volume",
+            side_effect=ElevationCancelled("cancelled"),
+        ),
+        patch("dislocker_ui.gui.messagebox.showinfo") as showinfo,
+        patch("dislocker_ui.gui.messagebox.showerror") as showerror,
+    ):
+        app.on_mount()
+
+    showerror.assert_not_called()
+    showinfo.assert_called_once()
+    assert showinfo.call_args.args[0] == "Cancelled"
+    assert "cancelled" in showinfo.call_args.args[1].lower()
+
+
+def test_on_mount_logs_elevation_request(tk_root: tk.Tk, sync_threads: None) -> None:
+    """When elevation is needed, the log notes the admin privileges request."""
+    app = _build_app(tk_root)
+    with (
+        patch("dislocker_ui.gui.needs_elevation", return_value=True),
+        patch("dislocker_ui.gui.mount_volume", return_value=_sample_session()),
+        patch("dislocker_ui.gui.messagebox.showinfo"),
+        patch("dislocker_ui.gui.load_session", return_value=_sample_session()),
+    ):
+        app.on_mount()
+    assert "Requesting administrator privileges" in app.log_text.get("1.0", tk.END)
+
+
 def test_on_unmount_success(tk_root: tk.Tk, sync_threads: None) -> None:
     """Successful Unmount shows confirmation and clears session status."""
     app = _build_app(tk_root, session=_sample_session())

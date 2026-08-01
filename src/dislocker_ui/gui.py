@@ -24,6 +24,7 @@ from tkinter import filedialog, messagebox, ttk
 from dislocker_ui import __version__
 from dislocker_ui.deps import DepsStatus, discover_deps
 from dislocker_ui.disks import DiskEntry, list_disk_entries
+from dislocker_ui.elevate import ElevationCancelled, ElevationTimedOut, needs_elevation
 from dislocker_ui.runner import (
     MountRequest,
     RunnerError,
@@ -256,6 +257,25 @@ class DislockerApp(ttk.Frame):
                         "Mounted", f"Available at:\n{path}"
                     ),
                 )
+            except ElevationCancelled as exc:
+                self.log(f"Cancelled: {exc}")
+                self.master.after(
+                    0,
+                    lambda: messagebox.showinfo(
+                        "Cancelled",
+                        "Administrator authorization was cancelled. Nothing was mounted.",
+                    ),
+                )
+            except ElevationTimedOut as exc:
+                self.log(f"ERROR: {exc}")
+                self.master.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "Authorization timed out",
+                        "The administrator prompt timed out. Try Mount again "
+                        "and complete the password dialog promptly.",
+                    ),
+                )
             except RunnerError as exc:
                 self.log(f"ERROR: {exc}")
                 err = str(exc)
@@ -270,6 +290,8 @@ class DislockerApp(ttk.Frame):
 
         self._set_busy(True)
         self.log("— Mount starting —")
+        if needs_elevation():
+            self.log("Requesting administrator privileges…")
         threading.Thread(target=worker, daemon=True).start()
 
     def on_unmount(self) -> None:
@@ -281,6 +303,25 @@ class DislockerApp(ttk.Frame):
             try:
                 unmount_volume(self.deps, self.log)
                 self.master.after(0, lambda: messagebox.showinfo("Unmounted", "Volume unmounted."))
+            except ElevationCancelled as exc:
+                self.log(f"Cancelled: {exc}")
+                self.master.after(
+                    0,
+                    lambda: messagebox.showinfo(
+                        "Cancelled",
+                        "Administrator authorization was cancelled. "
+                        "The volume may still be mounted.",
+                    ),
+                )
+            except ElevationTimedOut as exc:
+                self.log(f"ERROR: {exc}")
+                self.master.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "Authorization timed out",
+                        "The administrator prompt timed out. Try Unmount again.",
+                    ),
+                )
             except RunnerError as exc:
                 self.log(f"ERROR: {exc}")
                 err = str(exc)
@@ -295,6 +336,8 @@ class DislockerApp(ttk.Frame):
 
         self._set_busy(True)
         self.log("— Unmount starting —")
+        if needs_elevation():
+            self.log("Requesting administrator privileges…")
         threading.Thread(target=worker, daemon=True).start()
 
 
