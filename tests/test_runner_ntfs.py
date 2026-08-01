@@ -17,12 +17,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dislocker_ui.deps import DepsStatus
+from dislocker_ui.ntfs_mount import mount_ntfs as _mount_ntfs
+from dislocker_ui.ntfs_mount import ntfs3g_options as _ntfs3g_options
+from dislocker_ui.ntfs_mount import resolve_mount_owner as _resolve_mount_owner
 from dislocker_ui.runner import (
     MountRequest,
     UnlockMethod,
-    _mount_ntfs,
-    _ntfs3g_options,
-    _resolve_mount_owner,
 )
 
 
@@ -68,7 +68,7 @@ def test_resolve_mount_owner_sudo_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """SUDO_UID/SUDO_GID are used when valid and resolvable via pwd."""
     monkeypatch.setenv("SUDO_UID", "501")
     monkeypatch.setenv("SUDO_GID", "20")
-    with patch("dislocker_ui.runner._pwd_resolves", return_value=True):
+    with patch("dislocker_ui.ntfs_mount._pwd_resolves", return_value=True):
         assert _resolve_mount_owner() == (501, 20)
 
 
@@ -77,7 +77,7 @@ def test_resolve_mount_owner_fallback_warns() -> None:
     logs: list[str] = []
     with (
         patch.dict("os.environ", {}, clear=True),
-        patch("dislocker_ui.runner._parse_sudo_id", return_value=None),
+        patch("dislocker_ui.ntfs_mount._parse_sudo_id", return_value=None),
     ):
         # Clear SUDO vars explicitly for this process view
         import os

@@ -21,8 +21,6 @@ Requirements:
 
 from __future__ import annotations
 
-import os
-import pwd
 import re
 import shutil
 import subprocess
@@ -34,6 +32,8 @@ from enum import Enum
 from pathlib import Path
 
 from dislocker_ui.deps import DepsStatus
+from dislocker_ui.ntfs_mount import assert_mount_owner as _assert_mount_owner
+from dislocker_ui.ntfs_mount import mount_ntfs as _mount_ntfs
 from dislocker_ui.session import MountSession, clear_session, load_session, save_session
 
 LogFn = Callable[[str], None]
@@ -71,44 +71,93 @@ def mount_volume(
     uid: int | None = None,
     gid: int | None = None,
     elevated: bool = False,
+    fuse_log_path: Path | None = None,
 ) -> MountSession:
     """
     Unlock and mount a BitLocker volume for Finder access.
 
-    Starts dislocker-fuse in the background, attaches the virtual NTFS file as
-    a raw disk, then mounts it via ntfs-3g (read-only or read-write).
-
-    Optional *session_path* / *uid* / *gid* / *elevated* support the privileged
-    child path; the unprivileged facade (Task 3) may also pass them.
+    Public facade: on Darwin when not root, dispatches through elevate.py.
+    Privileged child calls this with elevated=True and euid==0 (no re-entry).
     """
+    from dislocker_ui.elevate import needs_elevation, prepare_elevation_paths, run_elevated_mount
+
+    if not elevated and needs_elevation():
+        sess_path, log_path = prepare_elevation_paths()
+        return run_elevated_mount(
+            req,
+            deps,
+            log,
+            session_path=sess_path,
+            log_path=log_path,
+        )
+
+    return _mount_in_process(
+        req,
+        deps,
+        log,
+        session_path=session_path,
+        uid=uid,
+        gid=gid,
+        elevated=elevated,
+        fuse_log_path=fuse_log_path,
+    )
+
+
+def _mount_in_process(
+    req: MountRequest,
+    deps: DepsStatus,
+    log: LogFn,
+    *,
+    session_path: Path | None = None,
+    uid: int | None = None,
+    gid: int | None = None,
+    elevated: bool = False,
+    fuse_log_path: Path | None = None,
+) -> MountSession:
+    """In-process mount pipeline (root / already elevated / non-Darwin)."""
     req = _canonicalize_bek_secret(req)
     volume = _validate_mount_request(req, deps, session_path=session_path)
 
-    # Prefer the process temp dir (private on macOS) over world-writable /tmp.
     fuse_mount = Path(tempfile.mkdtemp(prefix="dislocker-ui-"))
     ntfs_mount = _allocate_volume_path(req.volume_label)
     fuse_proc: subprocess.Popen[str] | None = None
+    fuse_log_handle = None
     raw_disk: str | None = None
 
     try:
         cmd = _build_dislocker_cmd(deps, req, fuse_mount)
         log("Starting dislocker-fuse…")
         log(_redact_cmd(cmd))
-        fuse_proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
+        if elevated and fuse_log_path is not None:
+            fuse_log_handle = fuse_log_path.open("a", encoding="utf-8")
+            popen_kwargs: dict = {
+                "stdout": fuse_log_handle,
+                "stderr": subprocess.STDOUT,
+                "start_new_session": True,
+            }
+        else:
+            popen_kwargs = {
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.STDOUT,
+                "text": True,
+            }
+        fuse_proc = subprocess.Popen(cmd, **popen_kwargs)
 
         dislocker_file = fuse_mount / "dislocker-file"
-        _wait_for_file(dislocker_file, fuse_proc, log, timeout_s=45)
+        _wait_for_file(
+            dislocker_file,
+            fuse_proc,
+            log,
+            timeout_s=45,
+            fuse_log_path=fuse_log_path if elevated else None,
+        )
 
         log("Attaching raw NTFS image with hdiutil…")
         raw_disk = _hdiutil_attach(deps, dislocker_file, log)
         log(f"Attached as {raw_disk}")
 
         used_ntfs3g = _mount_ntfs(deps, req, raw_disk, ntfs_mount, log, uid=uid, gid=gid)
+        _assert_mount_owner(ntfs_mount, uid=uid, gid=gid, log=log)
         session = MountSession(
             volume=volume,
             fuse_mount=str(fuse_mount),
@@ -135,6 +184,9 @@ def mount_volume(
         if fuse_proc is not None and fuse_proc.poll() is None:
             fuse_proc.terminate()
         raise
+    finally:
+        if fuse_log_handle is not None:
+            fuse_log_handle.close()
 
 
 def unmount_volume(
@@ -145,10 +197,21 @@ def unmount_volume(
 ) -> None:
     """
     Reverse the last MountSession: umount NTFS, detach raw disk, umount FUSE.
+
+    When the session was created via elevation and we are not root, re-elevate
+    (second admin prompt — accepted for 0.2.0).
     """
+    from dislocker_ui.elevate import needs_elevation, prepare_elevation_paths, run_elevated_unmount
+
     session = load_session(session_path)
     if session is None:
         raise RunnerError("No active session found to unmount")
+
+    if session.elevated and needs_elevation():
+        sess_path, log_path = prepare_elevation_paths()
+        target = session_path or sess_path
+        run_elevated_unmount(deps, log, session_path=target, log_path=log_path)
+        return
 
     errors: list[str] = []
     errors.extend(_unmount_ntfs(deps, session, log))
@@ -216,114 +279,6 @@ def _validate_mount_request(
             f"NTFS mount: {existing.ntfs_mount}"
         )
     return volume
-
-
-def _resolve_mount_owner(
-    uid: int | None = None,
-    gid: int | None = None,
-    *,
-    log: LogFn | None = None,
-) -> tuple[int, int]:
-    """
-    Resolve uid/gid for ntfs-3g ownership options.
-
-    Explicit values (elevated parent request) win. Otherwise use SUDO_UID /
-    SUDO_GID when set and valid; fall back to 0/0 with a warning (never refuse).
-    """
-    if uid is not None and gid is not None:
-        return uid, gid
-
-    sudo_uid = _parse_sudo_id(os.environ.get("SUDO_UID"))
-    sudo_gid = _parse_sudo_id(os.environ.get("SUDO_GID"))
-    if sudo_uid is not None and sudo_gid is not None and _pwd_resolves(sudo_uid):
-        return sudo_uid, sudo_gid
-
-    if log is not None:
-        log(
-            "Warning: mounting as uid=0/gid=0 (no SUDO_UID/SUDO_GID). "
-            "You may need sudo to write to an RW mount."
-        )
-    return 0, 0
-
-
-def _parse_sudo_id(raw: str | None) -> int | None:
-    """Parse a SUDO_UID/SUDO_GID value; return None if missing or invalid."""
-    if raw is None or raw == "":
-        return None
-    try:
-        return int(raw)
-    except ValueError:
-        return None
-
-
-def _pwd_resolves(uid: int) -> bool:
-    """Return True when *uid* maps to a passwd entry."""
-    try:
-        pwd.getpwuid(uid)
-        return True
-    except KeyError:
-        return False
-
-
-def _ntfs3g_options(
-    *,
-    readonly: bool,
-    uid: int,
-    gid: int,
-    volume_label: str,
-) -> str:
-    """Build the comma-separated -o option string for ntfs-3g."""
-    # Sanitize volname: commas would break the option list.
-    label = re.sub(r"[,=\0]", "_", volume_label) or "DislockerUI"
-    parts: list[str] = []
-    if readonly:
-        parts.append("ro")
-    parts.extend(
-        [
-            "allow_other",
-            "local",
-            f"uid={uid}",
-            f"gid={gid}",
-            "umask=077",
-            "fmask=177",
-            "dmask=077",
-            f"volname={label}",
-        ]
-    )
-    return ",".join(parts)
-
-
-def _mount_ntfs(
-    deps: DepsStatus,
-    req: MountRequest,
-    raw_disk: str,
-    ntfs_mount: Path,
-    log: LogFn,
-    *,
-    uid: int | None = None,
-    gid: int | None = None,
-) -> bool:
-    """
-    Mount the attached raw disk via ntfs-3g (always).
-
-    Optional *uid*/*gid* come from an elevated parent request; otherwise the
-    already-root SUDO_* / 0/0 rules apply. Always returns True (ntfs-3g used).
-    """
-    if not deps.ntfs3g:
-        raise RunnerError("ntfs-3g is required to mount BitLocker NTFS volumes")
-
-    owner_uid, owner_gid = _resolve_mount_owner(uid, gid, log=log)
-    opts = _ntfs3g_options(
-        readonly=req.readonly,
-        uid=owner_uid,
-        gid=owner_gid,
-        volume_label=req.volume_label,
-    )
-    mode = "read-only" if req.readonly else "read/write"
-    log(f"Mounting NTFS {mode} via ntfs-3g at {ntfs_mount}…")
-    ntfs_mount.mkdir(parents=True, exist_ok=True)
-    _run([deps.ntfs3g, raw_disk, str(ntfs_mount), "-o", opts], log)
-    return True
 
 
 def _run_with_fallback(
@@ -436,6 +391,8 @@ def _wait_for_file(
     proc: subprocess.Popen[str],
     log: LogFn,
     timeout_s: float,
+    *,
+    fuse_log_path: Path | None = None,
 ) -> None:
     """Wait until dislocker-file exists or the fuse process exits."""
     deadline = time.time() + timeout_s
@@ -444,11 +401,17 @@ def _wait_for_file(
             log(f"Found {path}")
             return
         if proc.poll() is not None:
-            out = ""
-            if proc.stdout is not None:
-                out = proc.stdout.read() or ""
+            detail = ""
+            if fuse_log_path is not None and fuse_log_path.is_file():
+                try:
+                    data = fuse_log_path.read_bytes()[-8192:]
+                    detail = data.decode("utf-8", errors="replace")
+                except OSError:
+                    detail = ""
+            elif proc.stdout is not None:
+                detail = proc.stdout.read() or ""
             raise RunnerError(
-                "dislocker-fuse exited before creating dislocker-file.\n" + out.strip()
+                "dislocker-fuse exited before creating dislocker-file.\n" + detail.strip()
             )
         time.sleep(0.25)
     raise RunnerError(f"Timed out waiting for {path}")

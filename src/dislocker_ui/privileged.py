@@ -98,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
                 uid=uid,
                 gid=gid,
                 elevated=True,
+                fuse_log_path=Path(payload["log_path"]),
             )
             _chown_session(session_path, uid, gid)
             log(f"privileged mount ok: {session.ntfs_mount}")

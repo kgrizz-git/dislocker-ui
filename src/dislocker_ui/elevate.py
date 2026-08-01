@@ -136,6 +136,37 @@ def run_elevated_unmount(
         _unlink_quiet(request_path)
 
 
+def prepare_elevation_paths() -> tuple[Path, Path]:
+    """
+    Prepare user-owned session directory and an ephemeral 0600 log file.
+
+    Returns (session_path, log_path). Does not create a placeholder session file.
+    """
+    from dislocker_ui.session import default_session_path
+
+    session_path = default_session_path()
+    assert_safe_path_for_elevation(session_path.parent, label="Application Support")
+    src_root = Path(__file__).resolve().parent.parent
+    assert_safe_path_for_elevation(src_root, label="package src")
+    fd, name = tempfile.mkstemp(prefix="dislocker-ui-log-", suffix=".log")
+    try:
+        os.fchmod(fd, 0o600)
+    finally:
+        os.close(fd)
+    return session_path, Path(name)
+
+
+def assert_safe_path_for_elevation(path: Path, *, label: str) -> None:
+    """Refuse elevation if *path* is a symlink or group/world-writable."""
+    if path.is_symlink():
+        raise RunnerError(f"Refusing to elevate: {label} is a symlink ({path})")
+    if not path.exists():
+        raise RunnerError(f"Refusing to elevate: {label} does not exist ({path})")
+    mode = path.stat().st_mode
+    if mode & 0o022:
+        raise RunnerError(f"Refusing to elevate: {label} is group/world-writable ({path})")
+
+
 def validate_volume_path(volume: str) -> None:
     """Refuse elevation unless volume looks like /dev/disk* or an existing file."""
     stripped = volume.strip()
