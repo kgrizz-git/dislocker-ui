@@ -80,9 +80,9 @@ sequenceDiagram
 - [ ] `runner.py` `_mount_ntfs`: drop kernel `mount -t ntfs -o rdonly`. Always use ntfs-3g; RO → `-o ro`.
 - [ ] Options: `ro` or RW defaults, plus `allow_other,local,uid=<orig_uid>,gid=<orig_gid>,umask=077,volname=<label>`. **`umask=077` is mandatory** with `allow_other` (otherwise every local account can read decrypted BitLocker data). Prefer `fmask=177,dmask=077` if directory execute bits matter.
 - [ ] **Decision (locked): drop `mount`** from `DepsStatus` / `core_ok` / `missing_core`. After removing the kernel RO path it is unused; `umount` stays. Update `test_deps.py`.
-- [ ] **`uid`/`gid` source:**
+- [ ] **`uid`/`gid` source (decided):**
   - Elevated path: integers from the **unprivileged parent** (`os.getuid()` / `os.getgid()`) written into the request.
-  - Already-root in-process path: use `SUDO_UID` / `SUDO_GID` when set and valid; otherwise fall back to `0`/`0` and log a warning that Finder ownership may be root (or refuse RW if we cannot map a real user — prefer warn + proceed for `sudo ./run.sh` RO).
+  - Already-root in-process path: use `SUDO_UID` / `SUDO_GID` when set and valid (int, resolves via `pwd`); otherwise fall back to `0`/`0`. **Warn + proceed — never refuse.** With `0`/`0` an RW mount is root-owned, so log a clear line that the user may need `sudo` to write; refusing would only trap the power-user `sudo ./run.sh` escape hatch for no safety gain (they are already root by choice).
 - [ ] Docs: ntfs-3g required on modern macOS.
 
 ### 1. `elevate.py` — exported API (locked)
@@ -139,6 +139,8 @@ CLI:
 | `4` | Unexpected exception (traceback appended to `log_path`, secrets redacted) |
 | other / osascript non-zero | Auth cancel/timeout/osascript failure — classified by `elevate.py` from stderr text |
 
+**Exit-code surfacing (required for the table above to work):** `do shell script` raises an AppleScript error whose **`error number` equals the child's shell exit status** (and `-128` for user cancel). So the AppleScript must let that status propagate — do **not** mask it with `|| true`, a trailing pipe, or `; echo`. `elevate.py` reads `osascript`'s non-zero exit and parses the trailing `(N)` / `number N` from its stderr to recover `2`/`3`/`4` vs `-128` vs timeout. Test `elevate.py` against captured sample stderr strings for each case so the mapping can't silently regress.
+
 **Parent behavior after osascript returns:**
 
 1. Always `unlink` request in `finally`.
@@ -150,7 +152,8 @@ CLI:
 
 **Paths (locked):**
 
-- `session_path` = normal Application Support session file from `default_session_path()` (`Path.home() / "Library" / "Application Support" / "dislocker-ui" / "active_session.json"`) run **as the user before elevating**. Pre-create the directory (user-owned). Optionally touch/create an empty or placeholder file mode 0600 so root only truncates/writes an existing inode — **never** a random `mkstemp` session path (that would break restart/unmount discovery).
+- `session_path` = normal Application Support session file from `default_session_path()` (`Path.home() / "Library" / "Application Support" / "dislocker-ui" / "active_session.json"`) run **as the user before elevating**. Pre-create the directory (user-owned); **never** a random `mkstemp` session path (that would break restart/unmount discovery).
+  - **Decided: do not pre-create a placeholder session file.** The symlink-swap protection comes from the pre-flight check (§Hardening) that the directory is user-owned and not a symlink / group-world-writable. Once the dir is validated, only the user or root could plant a symlink at `active_session.json`, so a placeholder inode adds nothing (and `runner.save_session` writes via `write_text`, which wouldn't `O_NOFOLLOW` anyway). Keep it simple.
 - `log_path` = **`mkstemp`** 0600 under `$TMPDIR` (ephemeral diagnostics only).
 - `request_path` = **`mkstemp`** 0600 under `$TMPDIR`.
 
