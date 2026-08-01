@@ -22,10 +22,13 @@ BitLocker cryptography and should not vendor dislocker sources.
 
 | Module | Responsibility |
 |--------|----------------|
-| `deps.py` | Locate binaries; report RW capability |
+| `deps.py` | Locate binaries; ntfs-3g is core on Darwin |
 | `disks.py` | List candidate disk devices (`diskutil`) |
 | `session.py` | Persist last mount session for clean unmount |
-| `runner.py` | Run mount/unmount command sequences |
+| `runner.py` | Mount/unmount facade (elevate or in-process) |
+| `elevate.py` | osascript admin prompt + request file protocol |
+| `privileged.py` | Root child: validate request, run pipeline |
+| `ntfs_mount.py` | ntfs-3g options / ownership helpers |
 | `gui.py` | tkinter UI |
 | `__main__.py` | Entry point |
 
@@ -110,7 +113,9 @@ Public contribution posture: Issues welcome; PRs may be limited to collaborators
 
 ## Security / privileges
 
-Mounting BitLocker volumes usually needs elevated rights to open `/dev/disk*`.
-Do not weaken that by copying volume contents into world-readable temp files
-unless the user asks for a decrypt-to-file feature.
-Never commit passwords, recovery keys, `.bek` files, or session dumps with secrets.
+Mounting BitLocker volumes needs elevated rights to open `/dev/disk*`. On Darwin
+the GUI stays unprivileged and elevates the full pipeline via osascript. Do not
+weaken that by copying volume contents into world-readable temp files unless the
+user asks for a decrypt-to-file feature. Never commit passwords, recovery keys,
+`.bek` files, or session dumps with secrets. BitLocker secrets may still appear
+briefly on `dislocker-fuse` argv (documented residual risk).

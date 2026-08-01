@@ -8,11 +8,21 @@ Version numbers match `VERSION` / SemVer with the public changelog.
 
 ## [Unreleased]
 
+_(none)_
+
+## [0.2.0] - 2026-07-31
+
 ### Added
 
-- Tracked planning harness: `plans/` (active), `plans/archive/` (finished),
-  root `TO_DO.md` (open work only), plus agent guidance in `AGENTS.md` /
-  `README.md`. Active plan: `plans/macos-elevation.md`.
+- Elevation modules and tests: `elevate.py`, `privileged.py`, `ntfs_mount.py`,
+  plus focused suites (`test_elevate`, `test_privileged`, `test_runner_elevation`,
+  `test_runner_ntfs`).
+- Archived plan: `plans/archive/2026-07-31-macos-elevation.md`.
+
+### Changed
+
+- Coverage includes elevate/privileged/ntfs_mount (runner still omitted).
+- `.gitignore` ignores `.superpowers/` SDD scratch.
 
 ## [0.1.6] - 2026-07-31
 

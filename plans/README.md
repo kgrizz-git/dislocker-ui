@@ -27,4 +27,4 @@ Tracked implementation plans for **dislocker-ui**.
 
 ## Active plans
 
-- [`macos-elevation.md`](macos-elevation.md) — admin elevation + ntfs-3g-required for 0.2.0
+_(none)_
