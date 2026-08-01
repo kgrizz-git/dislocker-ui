@@ -15,14 +15,14 @@ Open work only for **dislocker-ui**.
 
 ### macOS elevation (target 0.2.0)
 
-Plan: [`plans/macos-elevation.md`](plans/macos-elevation.md)
+Plan: [`plans/macos-elevation.md`](plans/macos-elevation.md)  
+Branch: `feature/macos-elevation` (exists)
 
-- [ ] Create branch `feature/macos-elevation` from `main`
-- [ ] Make `ntfs-3g` required on Darwin; replace kernel `mount -t ntfs` with ntfs-3g (`ro`/`rw` + `allow_other,local,uid,gid,volname`)
-- [ ] Add `elevate.py` (Darwin `euid != 0`, two-layer quoting, osascript + 600s timeout, cancel `-128`)
-- [ ] Add `privileged.py`; serialize `DepsStatus`; use `sys.executable` + `PYTHONPATH`; user-owned request `mkstemp` lifecycle
-- [ ] Add `MountSession.elevated`; plumb `session_path` through all runner call sites including cleanup
-- [ ] Elevated path: dislocker-fuse log-file redirect + `start_new_session`; wait errors from log tail
-- [ ] Route mount/unmount through elevation when Darwin and not root; in-process fallback when already root
-- [ ] Unit tests in `elevate` / `privileged`; Darwin no-auth osascript round-trip; secret-absence assertion
-- [ ] Bump to 0.2.0; update CHANGELOG / README / AGENTS; macFUSE caveat; two-prompt note
+- [ ] NTFS: require ntfs-3g; drop kernel `mount`; drop `deps.mount`; umask=077 + uid/gid/allow_other/local
+- [ ] Add `elevate.py` (API, quoting, osascript protocol, cancel/timeout errors)
+- [ ] Add `privileged.py` (request schema, validation, exit codes, `-s -P`, cwd `/`)
+- [ ] Runner facade dispatch + session_path plumbing + BEK canonicalize + FUSE log/session detach
+- [ ] GUI deps-hint reword + cancel/timeout dialogs
+- [ ] Hardening checklist from plan (volume validate, fstat/O_NOFOLLOW, preflight perms, post-mount uid assert, audit line)
+- [ ] Tests: elevate, privileged, deps, gui, focused runner elevation tests
+- [ ] Docs/version 0.2.0 (CHANGELOG gap 0.1.6 + 0.2.0; README/AGENTS; macFUSE caveat; argv residual note)
