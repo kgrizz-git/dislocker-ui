@@ -141,8 +141,10 @@ class DislockerApp(ttk.Frame):
     def _refresh_deps_label(self) -> None:
         """Update the dependency summary line."""
         if self.deps.core_ok:
-            write = "RW available (ntfs-3g found)" if self.deps.can_write else "RW needs ntfs-3g"
-            text = f"dislocker: {self.deps.dislocker_fuse}\nCore tools OK. {write}."
+            text = (
+                f"dislocker: {self.deps.dislocker_fuse}\n"
+                "Core tools OK (ntfs-3g required for RO and RW mounts)."
+            )
         else:
             missing = ", ".join(self.deps.missing_core())
             text = f"Missing required tools: {missing}. See README."
@@ -155,7 +157,10 @@ class DislockerApp(ttk.Frame):
             self.readonly_check.configure(state=tk.NORMAL)
         else:
             self.readonly_var.set(True)
-            self.rw_hint.configure(text="ntfs-3g not found — only read-only mounts are offered.")
+            self.rw_hint.configure(
+                text="ntfs-3g not found — mounts are unavailable until it is installed."
+            )
+            self.readonly_check.configure(state=tk.DISABLED)
 
     def _on_method_change(self) -> None:
         """Toggle password vs BEK browse UI."""

@@ -2,8 +2,8 @@
 Dependency discovery for dislocker-ui.
 
 Overall purpose:
-  Locate binaries needed for mount/unmount and report whether writable NTFS
-  mounting is available via ntfs-3g.
+  Locate binaries needed for mount/unmount and report whether the core
+  toolchain (including ntfs-3g) is available.
 
 Inputs:
   Optional PATH overrides via the process environment (standard shutil.which).
@@ -13,6 +13,8 @@ Outputs:
 
 Requirements:
   Standard library only (shutil, dataclasses).
+  On modern macOS, ntfs-3g is required for both read-only and read/write mounts
+  (kernel mount_ntfs is unavailable).
 """
 
 from __future__ import annotations
@@ -28,15 +30,14 @@ class DepsStatus:
     dislocker_fuse: str | None
     hdiutil: str | None
     diskutil: str | None
-    mount: str | None
     umount: str | None
     ntfs3g: str | None
 
     @property
     def core_ok(self) -> bool:
-        """True when the minimum mount toolchain is present."""
+        """True when the minimum mount toolchain (including ntfs-3g) is present."""
         return bool(
-            self.dislocker_fuse and self.hdiutil and self.diskutil and self.mount and self.umount
+            self.dislocker_fuse and self.hdiutil and self.diskutil and self.umount and self.ntfs3g
         )
 
     @property
@@ -50,8 +51,8 @@ class DepsStatus:
             "dislocker-fuse": self.dislocker_fuse,
             "hdiutil": self.hdiutil,
             "diskutil": self.diskutil,
-            "mount": self.mount,
             "umount": self.umount,
+            "ntfs-3g": self.ntfs3g,
         }
         return [name for name, path in mapping.items() if not path]
 
@@ -78,7 +79,6 @@ def discover_deps() -> DepsStatus:
         dislocker_fuse=which("dislocker-fuse") or which("dislocker"),
         hdiutil=which("hdiutil"),
         diskutil=which("diskutil"),
-        mount=which("mount"),
         umount=which("umount"),
         ntfs3g=ntfs,
     )

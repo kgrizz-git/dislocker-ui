@@ -16,11 +16,13 @@ Outputs:
   /tmp), raw disk attach, /Volumes mount, session file.
 
 Requirements:
-  dislocker-fuse, hdiutil, mount/umount; optional ntfs-3g for writable mounts.
+  dislocker-fuse, hdiutil, umount, and ntfs-3g (RO and RW on modern macOS).
 """
 
 from __future__ import annotations
 
+import os
+import pwd
 import re
 import shutil
 import subprocess
@@ -69,7 +71,7 @@ def mount_volume(
     Unlock and mount a BitLocker volume for Finder access.
 
     Starts dislocker-fuse in the background, attaches the virtual NTFS file as
-    a raw disk, then mounts it read-only (stock ntfs) or read-write (ntfs-3g).
+    a raw disk, then mounts it via ntfs-3g (read-only or read-write).
     """
     volume = _validate_mount_request(req, deps)
 
@@ -153,12 +155,6 @@ def _validate_mount_request(req: MountRequest, deps: DepsStatus) -> str:
     if not Path(volume).exists():
         raise RunnerError(f"Volume path does not exist: {volume}")
 
-    if req.readonly is False and not deps.can_write:
-        raise RunnerError(
-            "Read/write requested but ntfs-3g was not found. "
-            "Install ntfs-3g (and a FUSE backend) or leave Read-only checked."
-        )
-
     if req.method == UnlockMethod.BEK_FILE:
         bek = Path(req.secret).expanduser()
         if not bek.is_file():
@@ -175,25 +171,111 @@ def _validate_mount_request(req: MountRequest, deps: DepsStatus) -> str:
     return volume
 
 
+def _resolve_mount_owner(
+    uid: int | None = None,
+    gid: int | None = None,
+    *,
+    log: LogFn | None = None,
+) -> tuple[int, int]:
+    """
+    Resolve uid/gid for ntfs-3g ownership options.
+
+    Explicit values (elevated parent request) win. Otherwise use SUDO_UID /
+    SUDO_GID when set and valid; fall back to 0/0 with a warning (never refuse).
+    """
+    if uid is not None and gid is not None:
+        return uid, gid
+
+    sudo_uid = _parse_sudo_id(os.environ.get("SUDO_UID"))
+    sudo_gid = _parse_sudo_id(os.environ.get("SUDO_GID"))
+    if sudo_uid is not None and sudo_gid is not None and _pwd_resolves(sudo_uid):
+        return sudo_uid, sudo_gid
+
+    if log is not None:
+        log(
+            "Warning: mounting as uid=0/gid=0 (no SUDO_UID/SUDO_GID). "
+            "You may need sudo to write to an RW mount."
+        )
+    return 0, 0
+
+
+def _parse_sudo_id(raw: str | None) -> int | None:
+    """Parse a SUDO_UID/SUDO_GID value; return None if missing or invalid."""
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def _pwd_resolves(uid: int) -> bool:
+    """Return True when *uid* maps to a passwd entry."""
+    try:
+        pwd.getpwuid(uid)
+        return True
+    except KeyError:
+        return False
+
+
+def _ntfs3g_options(
+    *,
+    readonly: bool,
+    uid: int,
+    gid: int,
+    volume_label: str,
+) -> str:
+    """Build the comma-separated -o option string for ntfs-3g."""
+    # Sanitize volname: commas would break the option list.
+    label = re.sub(r"[,=\0]", "_", volume_label) or "DislockerUI"
+    parts: list[str] = []
+    if readonly:
+        parts.append("ro")
+    parts.extend(
+        [
+            "allow_other",
+            "local",
+            f"uid={uid}",
+            f"gid={gid}",
+            "umask=077",
+            "fmask=177",
+            "dmask=077",
+            f"volname={label}",
+        ]
+    )
+    return ",".join(parts)
+
+
 def _mount_ntfs(
     deps: DepsStatus,
     req: MountRequest,
     raw_disk: str,
     ntfs_mount: Path,
     log: LogFn,
+    *,
+    uid: int | None = None,
+    gid: int | None = None,
 ) -> bool:
-    """Mount the attached raw disk; return True when ntfs-3g was used."""
+    """
+    Mount the attached raw disk via ntfs-3g (always).
+
+    Optional *uid*/*gid* come from an elevated parent request; otherwise the
+    already-root SUDO_* / 0/0 rules apply. Always returns True (ntfs-3g used).
+    """
+    if not deps.ntfs3g:
+        raise RunnerError("ntfs-3g is required to mount BitLocker NTFS volumes")
+
+    owner_uid, owner_gid = _resolve_mount_owner(uid, gid, log=log)
+    opts = _ntfs3g_options(
+        readonly=req.readonly,
+        uid=owner_uid,
+        gid=owner_gid,
+        volume_label=req.volume_label,
+    )
+    mode = "read-only" if req.readonly else "read/write"
+    log(f"Mounting NTFS {mode} via ntfs-3g at {ntfs_mount}…")
     ntfs_mount.mkdir(parents=True, exist_ok=True)
-    if req.readonly:
-        log(f"Mounting NTFS read-only at {ntfs_mount}…")
-        _run(
-            [deps.mount, "-t", "ntfs", "-o", "rdonly", raw_disk, str(ntfs_mount)],
-            log,
-        )
-        return False
-    assert deps.ntfs3g
-    log(f"Mounting NTFS read/write via ntfs-3g at {ntfs_mount}…")
-    _run([deps.ntfs3g, raw_disk, str(ntfs_mount)], log)
+    _run([deps.ntfs3g, raw_disk, str(ntfs_mount), "-o", opts], log)
     return True
 
 
