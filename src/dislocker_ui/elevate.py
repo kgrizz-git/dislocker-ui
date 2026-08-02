@@ -231,6 +231,8 @@ def build_privileged_shell_command(action: str, request_path: Path) -> str:
         "-m",
         "dislocker_ui.privileged",
         action,
+        "--uid",
+        str(os.getuid()),
         "--request",
         str(request_path.resolve()),
     ]

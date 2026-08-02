@@ -59,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     """CLI entry: parse args, force cwd ``/``, dispatch mount/unmount."""
     parser = argparse.ArgumentParser(prog="dislocker_ui.privileged")
     parser.add_argument("action", choices=("mount", "unmount"))
+    parser.add_argument("--uid", required=True, type=int)
     parser.add_argument("--request", required=True, type=Path)
     args = parser.parse_args(argv)
 
@@ -70,15 +71,18 @@ def main(argv: list[str] | None = None) -> int:
 
     log_fp: TextIO | None = None
     try:
-        payload = _load_and_unlink_request(args.request)
+        # Confine every filesystem path this root process touches under the
+        # invoking user's own Application Support dir, derived from the system
+        # passwd database via the trusted --uid arg (not request data).
+        base = _user_base(args.uid)
+        request_path = _confine_under_base(str(args.request), base, label="request")
+        payload = _load_and_unlink_request(request_path)
         _validate_request(payload, expected_action=args.action)
 
         uid = int(payload["uid"])
         gid = int(payload["gid"])
-        # Confine every filesystem path this root process touches under the
-        # invoking user's own Application Support dir, derived from the system
-        # passwd database (trusted) rather than the request (attacker-influenced).
-        base = _user_base(uid)
+        if uid != args.uid:
+            raise _ValidationError(f"request uid {uid} != --uid {args.uid}")
         session_path = _confine_under_base(payload["session_path"], base, label="session_path")
         log_path = _confine_under_base(payload["log_path"], base, label="log_path")
 
@@ -148,16 +152,20 @@ def _user_base(uid: int) -> Path:
 
 def _confine_under_base(value: str, base: Path, *, label: str) -> Path:
     """
-    Resolve *value* and require it to live inside *base* (no ``..`` escape).
+    Resolve *value*, require it directly inside *base*, and rebuild it safely.
 
-    Returns the realpath; raises _ValidationError if it escapes the base dir.
+    The child only ever addresses single files that live directly in the base
+    dir, so after the containment check we return ``base / basename`` — stripping
+    any directory component so the returned path cannot escape *base*.
     """
     resolved = Path(os.path.realpath(value))
     try:
-        resolved.relative_to(base)
+        parent = resolved.parent.relative_to(base)
     except ValueError as exc:
         raise _ValidationError(f"{label} escapes {base}: {value}") from exc
-    return resolved
+    if parent != Path("."):
+        raise _ValidationError(f"{label} must be directly inside {base}: {value}")
+    return base / os.path.basename(resolved)
 
 
 def _load_and_unlink_request(path: Path) -> dict[str, Any]:

@@ -127,7 +127,7 @@ def test_main_validation_exit_2(tmp_path: Path) -> None:
     """Invalid request JSON yields exit code 2."""
     req = tmp_path / "bad.json"
     req.write_text("{not-json", encoding="utf-8")
-    assert main(["mount", "--request", str(req)]) == EXIT_VALIDATION
+    assert main(["mount", "--uid", str(os.getuid()), "--request", str(req)]) == EXIT_VALIDATION
 
 
 def test_main_mount_success(tmp_path: Path) -> None:
@@ -142,7 +142,7 @@ def test_main_mount_success(tmp_path: Path) -> None:
         patch("dislocker_ui.privileged.os.chdir"),
         patch("dislocker_ui.privileged._user_base", return_value=tmp_path.resolve()),
     ):
-        code = main(["mount", "--request", str(req)])
+        code = main(["mount", "--uid", str(os.getuid()), "--request", str(req)])
     assert code == EXIT_OK
     assert not req.exists()  # unlinked after read
     mount.assert_called_once()
@@ -163,7 +163,7 @@ def test_main_runner_error_exit_3(tmp_path: Path) -> None:
         patch("dislocker_ui.privileged.os.chdir"),
         patch("dislocker_ui.privileged._user_base", return_value=tmp_path.resolve()),
     ):
-        assert main(["mount", "--request", str(req)]) == EXIT_RUNNER
+        assert main(["mount", "--uid", str(os.getuid()), "--request", str(req)]) == EXIT_RUNNER
 
 
 def test_main_unexpected_exit_4(tmp_path: Path) -> None:
@@ -179,7 +179,7 @@ def test_main_unexpected_exit_4(tmp_path: Path) -> None:
         patch("dislocker_ui.privileged.os.chdir"),
         patch("dislocker_ui.privileged._user_base", return_value=tmp_path.resolve()),
     ):
-        assert main(["mount", "--request", str(req)]) == EXIT_UNEXPECTED
+        assert main(["mount", "--uid", str(os.getuid()), "--request", str(req)]) == EXIT_UNEXPECTED
 
 
 def test_main_never_calls_discover_deps(tmp_path: Path) -> None:
@@ -194,7 +194,7 @@ def test_main_never_calls_discover_deps(tmp_path: Path) -> None:
         patch("dislocker_ui.privileged._user_base", return_value=tmp_path.resolve()),
         patch("dislocker_ui.deps.discover_deps") as discover,
     ):
-        assert main(["mount", "--request", str(req)]) == EXIT_OK
+        assert main(["mount", "--uid", str(os.getuid()), "--request", str(req)]) == EXIT_OK
     discover.assert_not_called()
 
 
@@ -219,7 +219,7 @@ def test_main_rejects_session_path_escaping_base(tmp_path: Path) -> None:
         patch("dislocker_ui.privileged.os.chdir"),
         patch("dislocker_ui.privileged._user_base", return_value=tmp_path.resolve()),
     ):
-        assert main(["mount", "--request", str(req)]) == EXIT_VALIDATION
+        assert main(["mount", "--uid", str(os.getuid()), "--request", str(req)]) == EXIT_VALIDATION
 
 
 def test_load_and_unlink_request_rejects_symlink(tmp_path: Path) -> None:
