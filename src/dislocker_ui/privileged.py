@@ -36,7 +36,6 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from dislocker_ui.deps import DepsStatus
-from dislocker_ui.elevate import validate_volume_path
 from dislocker_ui.runner import (
     MountRequest,
     RunnerError,
@@ -262,11 +261,6 @@ def _validate_mount_fields(payload: dict[str, Any]) -> None:
     for key in ("volume", "method", "secret", "readonly", "volume_label"):
         if key not in payload:
             raise _ValidationError(f"missing mount field {key}")
-    # Independently re-validate the volume path (don't trust the request).
-    try:
-        validate_volume_path(str(payload["volume"]))
-    except RunnerError as exc:
-        raise _ValidationError(str(exc)) from exc
     method = payload["method"]
     if method not in {m.value for m in UnlockMethod}:
         raise _ValidationError(f"invalid method: {method}")

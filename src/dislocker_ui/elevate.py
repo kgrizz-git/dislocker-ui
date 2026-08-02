@@ -50,6 +50,9 @@ _LOG_TAIL_BYTES = 8 * 1024
 _VOLUME_RE = re.compile(r"^/dev/disk\d+(s\d+)?$")
 _ERROR_NUMBER_RE = re.compile(r"\((-?\d+)\)\s*$|number\s+(-?\d+)", re.IGNORECASE)
 _EXIT_REASONS = {2: "request validation", 3: "mount/unmount", 4: "unexpected"}
+_TIMED_OUT_MSG = (
+    "Administrator authorization timed out. Try again and complete the prompt promptly."
+)
 
 
 class ElevationCancelled(RunnerError):
@@ -269,9 +272,7 @@ def classify_osascript_failure(stderr: str, *, log_path: Path | None = None) -> 
     if code == -128:
         return ElevationCancelled("Administrator authorization was cancelled.")
     if code == -1712:
-        return ElevationTimedOut(
-            "Administrator authorization timed out. Try again and complete the prompt promptly."
-        )
+        return ElevationTimedOut(_TIMED_OUT_MSG)
     if code in _EXIT_REASONS:
         return RunnerError(
             f"Elevated {_EXIT_REASONS[code]} failed (exit {code}).\n{detail}\n{tail}".strip()
@@ -281,9 +282,7 @@ def classify_osascript_failure(stderr: str, *, log_path: Path | None = None) -> 
     if "user canceled" in lower or "user cancelled" in lower:
         return ElevationCancelled("Administrator authorization was cancelled.")
     if "timed out" in lower or "appleevent timed out" in lower or "timeout of" in lower:
-        return ElevationTimedOut(
-            "Administrator authorization timed out. Try again and complete the prompt promptly."
-        )
+        return ElevationTimedOut(_TIMED_OUT_MSG)
     return RunnerError(f"Administrator elevation failed.\n{detail}\n{tail}".strip())
 
 
@@ -366,9 +365,7 @@ def _run_osascript(request_path: Path, *, action: str, log: LogFn, log_path: Pat
             timeout=_TIMEOUT_SECONDS + 30,
         )
     except subprocess.TimeoutExpired as exc:
-        raise ElevationTimedOut(
-            "Administrator authorization timed out. Try again and complete the prompt promptly."
-        ) from exc
+        raise ElevationTimedOut(_TIMED_OUT_MSG) from exc
     if completed.returncode == 0:
         return
     stderr = completed.stderr or completed.stdout or ""
