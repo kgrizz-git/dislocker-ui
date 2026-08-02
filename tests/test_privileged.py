@@ -236,7 +236,8 @@ def test_assert_safe_base_accepts_and_rejects(tmp_path: Path) -> None:
 
     wide = tmp_path / "wide"
     wide.mkdir()
-    os.chmod(wide, 0o720)  # add group-write (no world bits)
+    # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+    os.chmod(wide, 0o720)  # intentional group-writable fixture to exercise rejection
     with pytest.raises(_ValidationError, match="writable"):
         _assert_safe_base(wide, uid)
 
