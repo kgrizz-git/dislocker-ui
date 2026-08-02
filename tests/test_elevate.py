@@ -98,6 +98,20 @@ def test_applescript_contains_request_path_not_secret(tmp_path: Path) -> None:
     assert secret not in cmd
 
 
+def test_sweep_stale_elevation_files(tmp_path: Path) -> None:
+    """Stale request/log temp files are removed; unrelated files are kept."""
+    from dislocker_ui.elevate import _sweep_stale_elevation_files
+
+    (tmp_path / "dislocker-ui-req-abc.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "dislocker-ui-log-xyz.log").write_text("x", encoding="utf-8")
+    keep = tmp_path / "active_session.json"
+    keep.write_text("{}", encoding="utf-8")
+    _sweep_stale_elevation_files(tmp_path)
+    assert not (tmp_path / "dislocker-ui-req-abc.json").exists()
+    assert not (tmp_path / "dislocker-ui-log-xyz.log").exists()
+    assert keep.exists()
+
+
 @pytest.mark.parametrize(
     ("stderr", "exc_type"),
     [
@@ -168,7 +182,7 @@ def test_run_elevated_mount_success_loads_session(tmp_path: Path) -> None:
     )
     logs: list[str] = []
 
-    def fake_run(argv, check, capture_output, text):
+    def fake_run(argv, **_kwargs):
         # Ensure AppleScript was built without the secret.
         script = argv[2]
         assert "sekrit" not in script

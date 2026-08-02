@@ -222,6 +222,46 @@ def test_main_rejects_session_path_escaping_base(tmp_path: Path) -> None:
         assert main(["mount", "--uid", str(os.getuid()), "--request", str(req)]) == EXIT_VALIDATION
 
 
+def test_assert_safe_base_accepts_and_rejects(tmp_path: Path) -> None:
+    """A user-owned dir passes; a symlink or world-writable base is refused."""
+    from dislocker_ui.privileged import _assert_safe_base, _ValidationError
+
+    _assert_safe_base(tmp_path, os.getuid())  # owned, not a symlink, 0700-ish
+
+    link = tmp_path / "linkdir"
+    link.symlink_to(tmp_path)
+    with pytest.raises(_ValidationError, match="symlink"):
+        _assert_safe_base(link, os.getuid())
+
+    wide = tmp_path / "wide"
+    wide.mkdir()
+    os.chmod(wide, 0o777)
+    with pytest.raises(_ValidationError, match="writable"):
+        _assert_safe_base(wide, os.getuid())
+
+
+def test_chown_failure_still_reports_success(tmp_path: Path) -> None:
+    """A chown failure after a good mount warns but keeps exit 0."""
+    payload = _mount_payload(tmp_path)
+    req = tmp_path / "req.json"
+    req.write_text(json.dumps(payload), encoding="utf-8")
+    with (
+        patch("dislocker_ui.privileged.mount_volume", return_value=MagicMock(ntfs_mount="/V/X")),
+        patch("dislocker_ui.privileged._chown_session", side_effect=RunnerError("denied")),
+        patch("dislocker_ui.privileged.os.chdir"),
+        patch("dislocker_ui.privileged._user_base", return_value=tmp_path.resolve()),
+    ):
+        assert main(["mount", "--uid", str(os.getuid()), "--request", str(req)]) == EXIT_OK
+
+
+def test_validate_mount_fields_rejects_bad_volume(tmp_path: Path) -> None:
+    """The child independently rejects a volume that is not a disk or file."""
+    payload = _mount_payload(tmp_path)
+    payload["volume"] = "/dev/rdisk0"
+    with pytest.raises(Exception, match="Refusing to elevate for volume"):
+        _validate_request(payload, expected_action="mount")
+
+
 def test_load_and_unlink_request_rejects_symlink(tmp_path: Path) -> None:
     """A symlinked request path is refused before it is read."""
     from dislocker_ui.privileged import _load_and_unlink_request, _ValidationError

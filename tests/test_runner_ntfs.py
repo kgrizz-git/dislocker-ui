@@ -80,11 +80,6 @@ def test_resolve_mount_owner_fallback_warns() -> None:
         patch.dict("os.environ", {}, clear=True),
         patch("dislocker_ui.ntfs_mount._parse_sudo_id", return_value=None),
     ):
-        # Clear SUDO vars explicitly for this process view
-        import os
-
-        for key in ("SUDO_UID", "SUDO_GID"):
-            os.environ.pop(key, None)
         uid, gid = _resolve_mount_owner(log=logs.append)
     assert (uid, gid) == (0, 0)
     assert any("uid=0/gid=0" in line for line in logs)
@@ -101,6 +96,8 @@ def test_assert_mount_owner_mismatch(tmp_path: Path) -> None:
     with pytest.raises(RunnerError, match="ownership mismatch"):
         assert_mount_owner(mnt, uid=other_uid, gid=None, log=lambda _m: None)
 
+
+def test_mount_ntfs_invokes_ntfs3g(tmp_path: Path) -> None:
     """_mount_ntfs invokes ntfs-3g with assembled -o options (never kernel mount)."""
     req = MountRequest(
         volume="/dev/disk2s1",

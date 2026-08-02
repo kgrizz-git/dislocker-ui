@@ -30,11 +30,13 @@ import pwd
 import re
 import stat
 import sys
+import time
 import traceback
 from pathlib import Path
 from typing import Any, TextIO
 
 from dislocker_ui.deps import DepsStatus
+from dislocker_ui.elevate import validate_volume_path
 from dislocker_ui.runner import (
     MountRequest,
     RunnerError,
@@ -87,8 +89,6 @@ def main(argv: list[str] | None = None) -> int:
         log_path = _confine_under_base(payload["log_path"], base, label="log_path")
 
         log_fp = _open_log(log_path, owner_uid=uid)
-        import time
-
         log_fp.write(
             f"audit ts={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} "
             f"action={payload['action']} uid={uid} "
@@ -115,7 +115,12 @@ def main(argv: list[str] | None = None) -> int:
                 elevated=True,
                 fuse_log_path=log_path,
             )
-            _chown_session(session_path, uid, gid)
+            try:
+                _chown_session(session_path, uid, gid)
+            except RunnerError as exc:
+                # The mount succeeded; a chown failure only means the session
+                # file stays root-owned. Warn and still report success.
+                log(f"warning: {exc}")
             log(f"privileged mount ok: {session.ntfs_mount}")
         else:
             unmount_volume(deps, log, session_path=session_path)
@@ -147,7 +152,25 @@ def _user_base(uid: int) -> Path:
         home = Path(pwd.getpwuid(uid).pw_dir)
     except KeyError as exc:
         raise _ValidationError(f"uid {uid} has no passwd entry") from exc
-    return (home / "Library" / "Application Support" / "dislocker-ui").resolve()
+    base = home / "Library" / "Application Support" / "dislocker-ui"
+    _assert_safe_base(base, uid)
+    return base.resolve()
+
+
+def _assert_safe_base(base: Path, uid: int) -> None:
+    """Refuse a confinement base that a non-owner could have tampered with."""
+    try:
+        info = os.lstat(base)
+    except OSError as exc:
+        raise _ValidationError(f"confinement base unavailable ({base}): {exc}") from exc
+    if stat.S_ISLNK(info.st_mode):
+        raise _ValidationError(f"confinement base must not be a symlink: {base}")
+    if not stat.S_ISDIR(info.st_mode):
+        raise _ValidationError(f"confinement base is not a directory: {base}")
+    if info.st_uid != uid:
+        raise _ValidationError(f"confinement base not owned by uid {uid}: {base}")
+    if info.st_mode & 0o022:
+        raise _ValidationError(f"confinement base is group/world-writable: {base}")
 
 
 def _confine_under_base(value: str, base: Path, *, label: str) -> Path:
@@ -239,6 +262,11 @@ def _validate_mount_fields(payload: dict[str, Any]) -> None:
     for key in ("volume", "method", "secret", "readonly", "volume_label"):
         if key not in payload:
             raise _ValidationError(f"missing mount field {key}")
+    # Independently re-validate the volume path (don't trust the request).
+    try:
+        validate_volume_path(str(payload["volume"]))
+    except RunnerError as exc:
+        raise _ValidationError(str(exc)) from exc
     method = payload["method"]
     if method not in {m.value for m in UnlockMethod}:
         raise _ValidationError(f"invalid method: {method}")

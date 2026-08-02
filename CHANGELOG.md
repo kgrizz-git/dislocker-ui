@@ -38,10 +38,8 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
 ## [0.1.6] - 2026-07-31
 
-### Changed
-
-- Plans / TO_DO harness workflow and agent guidance updates (see
-  `CHANGELOG.dev.md`). Version file aligned for the elevation track.
+No user-facing changes; internal version alignment for the elevation track.
+Developer/harness details live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
 ## [0.1.5] - 2026-07-31
 

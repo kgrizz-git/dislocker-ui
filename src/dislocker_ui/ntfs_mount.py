@@ -22,10 +22,18 @@ import pwd
 import re
 from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 
 from dislocker_ui.deps import DepsStatus
 
 LogFn = Callable[[str], None]
+
+
+class _MountReq(Protocol):
+    """Structural shape of the request fields mount_ntfs needs."""
+
+    readonly: bool
+    volume_label: str
 
 
 def assert_mount_owner(
@@ -129,7 +137,7 @@ def ntfs3g_options(
 
 def mount_ntfs(
     deps: DepsStatus,
-    req: object,
+    req: _MountReq,
     raw_disk: str,
     ntfs_mount: Path,
     log: LogFn,
@@ -150,12 +158,12 @@ def mount_ntfs(
 
     owner_uid, owner_gid = resolve_mount_owner(uid, gid, log=log)
     opts = ntfs3g_options(
-        readonly=bool(req.readonly),  # type: ignore[attr-defined]
+        readonly=bool(req.readonly),
         uid=owner_uid,
         gid=owner_gid,
-        volume_label=str(req.volume_label),  # type: ignore[attr-defined]
+        volume_label=str(req.volume_label),
     )
-    mode = "read-only" if req.readonly else "read/write"  # type: ignore[attr-defined]
+    mode = "read-only" if req.readonly else "read/write"
     log(f"Mounting NTFS {mode} via ntfs-3g at {ntfs_mount}…")
     ntfs_mount.mkdir(parents=True, exist_ok=True)
     _run([deps.ntfs3g, raw_disk, str(ntfs_mount), "-o", opts], log)

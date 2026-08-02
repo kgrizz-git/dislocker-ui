@@ -21,6 +21,7 @@ Requirements:
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -91,11 +92,12 @@ def mount_volume(
                 f"NTFS mount: {existing.ntfs_mount}"
             )
         sess_path, log_path = prepare_elevation_paths()
+        target = session_path or sess_path
         return run_elevated_mount(
             req,
             deps,
             log,
-            session_path=sess_path,
+            session_path=target,
             log_path=log_path,
         )
 
@@ -137,7 +139,9 @@ def _mount_in_process(
         log("Starting dislocker-fuse…")
         log(_redact_cmd(cmd))
         if elevated and fuse_log_path is not None:
-            fuse_log_handle = fuse_log_path.open("a", encoding="utf-8")
+            # Reopen the already-validated log without following a symlink.
+            log_fd = os.open(str(fuse_log_path), os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW)
+            fuse_log_handle = os.fdopen(log_fd, "a", encoding="utf-8")
             popen_kwargs: dict = {
                 "stdout": fuse_log_handle,
                 "stderr": subprocess.STDOUT,

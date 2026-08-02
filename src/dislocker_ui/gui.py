@@ -24,7 +24,7 @@ from tkinter import filedialog, messagebox, ttk
 from dislocker_ui import __version__
 from dislocker_ui.deps import DepsStatus, discover_deps
 from dislocker_ui.disks import DiskEntry, list_disk_entries
-from dislocker_ui.elevate import ElevationCancelled, ElevationTimedOut, needs_elevation
+from dislocker_ui.elevate import ElevationCancelled, ElevationTimedOut
 from dislocker_ui.runner import (
     MountRequest,
     RunnerError,
@@ -290,8 +290,6 @@ class DislockerApp(ttk.Frame):
 
         self._set_busy(True)
         self.log("— Mount starting —")
-        if needs_elevation():
-            self.log("Requesting administrator privileges…")
         threading.Thread(target=worker, daemon=True).start()
 
     def on_unmount(self) -> None:
@@ -336,8 +334,6 @@ class DislockerApp(ttk.Frame):
 
         self._set_busy(True)
         self.log("— Unmount starting —")
-        if needs_elevation():
-            self.log("Requesting administrator privileges…")
         threading.Thread(target=worker, daemon=True).start()
 
 

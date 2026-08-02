@@ -49,6 +49,7 @@ _TIMEOUT_SECONDS = 600
 _LOG_TAIL_BYTES = 8 * 1024
 _VOLUME_RE = re.compile(r"^/dev/disk\d+(s\d+)?$")
 _ERROR_NUMBER_RE = re.compile(r"\((-?\d+)\)\s*$|number\s+(-?\d+)", re.IGNORECASE)
+_EXIT_REASONS = {2: "request validation", 3: "mount/unmount", 4: "unexpected"}
 
 
 class ElevationCancelled(RunnerError):
@@ -142,6 +143,10 @@ def prepare_elevation_paths() -> tuple[Path, Path]:
     # imports from and its parent against symlink/world-writable tampering.
     assert_safe_path_for_elevation(src_root, label="package src")
     assert_safe_path_for_elevation(package_dir, label="package dir")
+    # These temp files live in the persistent Application Support dir (not a
+    # reboot-cleared temp dir) so the child can confine them; sweep any left
+    # behind by a killed run first — a stale request file can hold a secret.
+    _sweep_stale_elevation_files(session_path.parent)
     # Keep the log beside the session file in the validated, user-owned
     # Application Support dir so the privileged child can confine every path it
     # touches under one trusted base (not a world-shared temp dir).
@@ -153,6 +158,13 @@ def prepare_elevation_paths() -> tuple[Path, Path]:
     finally:
         os.close(fd)
     return session_path, Path(name)
+
+
+def _sweep_stale_elevation_files(directory: Path) -> None:
+    """Best-effort removal of request/log temp files left by a prior run."""
+    for pattern in ("dislocker-ui-req-*.json", "dislocker-ui-log-*.log"):
+        for stale in directory.glob(pattern):
+            _unlink_quiet(stale)
 
 
 def assert_safe_path_for_elevation(path: Path, *, label: str) -> None:
@@ -260,10 +272,9 @@ def classify_osascript_failure(stderr: str, *, log_path: Path | None = None) -> 
         return ElevationTimedOut(
             "Administrator authorization timed out. Try again and complete the prompt promptly."
         )
-    if code in (2, 3, 4):
+    if code in _EXIT_REASONS:
         return RunnerError(
-            f"Elevated { {2: 'request validation', 3: 'mount/unmount', 4: 'unexpected'}[code] } "
-            f"failed (exit {code}).\n{detail}\n{tail}".strip()
+            f"Elevated {_EXIT_REASONS[code]} failed (exit {code}).\n{detail}\n{tail}".strip()
         )
 
     # No recognizable error number — fall back to text heuristics.
@@ -346,12 +357,18 @@ def _run_osascript(request_path: Path, *, action: str, log: LogFn, log_path: Pat
     shell_cmd = build_privileged_shell_command(action, request_path)
     script = build_osascript(shell_cmd)
     log("Requesting administrator privileges…")
-    completed = subprocess.run(
-        [_OSASCRIPT, "-e", script],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            [_OSASCRIPT, "-e", script],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=_TIMEOUT_SECONDS + 30,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ElevationTimedOut(
+            "Administrator authorization timed out. Try again and complete the prompt promptly."
+        ) from exc
     if completed.returncode == 0:
         return
     stderr = completed.stderr or completed.stdout or ""
