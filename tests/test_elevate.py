@@ -13,6 +13,8 @@ Requirements:
 from __future__ import annotations
 
 import json
+import threading
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -25,6 +27,7 @@ from dislocker_ui.elevate import (
     build_osascript,
     build_privileged_shell_command,
     classify_osascript_failure,
+    elevation_transaction,
     needs_elevation,
     run_elevated_mount,
     serialize_deps,
@@ -123,11 +126,6 @@ def test_overlapping_elevation_transactions_are_serialized(
 
     Regression for concurrent prepare sweeps deleting an in-flight request/log.
     """
-    import threading
-    import time
-
-    from dislocker_ui.elevate import elevation_transaction
-
     support = tmp_path / "Application Support" / "dislocker-ui"
     support.mkdir(parents=True)
     monkeypatch.setattr(
@@ -145,6 +143,9 @@ def test_overlapping_elevation_transactions_are_serialized(
     errors: list[BaseException] = []
     holder_log: list[Path] = []
     waiter_log: list[Path] = []
+    # Observations recorded in threads; asserts stay on the main thread (S5779).
+    holder_saw_release = threading.Event()
+    holder_files_ok = threading.Event()
 
     def holder() -> None:
         try:
@@ -154,19 +155,26 @@ def test_overlapping_elevation_transactions_are_serialized(
                 req.write_text('{"secret":"x"}', encoding="utf-8")
                 holder_log.append(log_path)
                 holder_ready.set()
-                assert release_holder.wait(timeout=5.0)
-                assert log_path.exists(), "holder log deleted while lock held"
-                assert req.exists(), "holder request deleted while lock held"
-        except BaseException as exc:
+                if not release_holder.wait(timeout=5.0):
+                    errors.append(TimeoutError("holder did not see release signal"))
+                    return
+                holder_saw_release.set()
+                if log_path.exists() and req.exists():
+                    holder_files_ok.set()
+                else:
+                    errors.append(RuntimeError("holder request/log deleted while lock held"))
+        except Exception as exc:
             errors.append(exc)
 
     def waiter() -> None:
         try:
-            assert holder_ready.wait(timeout=5.0)
+            if not holder_ready.wait(timeout=5.0):
+                errors.append(TimeoutError("waiter did not see holder ready"))
+                return
             with elevation_transaction() as (_sess, log_path):
                 waiter_log.append(log_path)
                 waiter_entered.set()
-        except BaseException as exc:
+        except Exception as exc:
             errors.append(exc)
 
     t_hold = threading.Thread(target=holder)
@@ -182,8 +190,11 @@ def test_overlapping_elevation_transactions_are_serialized(
     release_holder.set()
     t_hold.join(timeout=5.0)
     t_wait.join(timeout=5.0)
-    assert not t_hold.is_alive() and not t_wait.is_alive()
+    assert not t_hold.is_alive()
+    assert not t_wait.is_alive()
     assert not errors, f"thread errors: {errors}"
+    assert holder_saw_release.is_set()
+    assert holder_files_ok.is_set()
     assert waiter_entered.is_set()
     assert waiter_log
     # After the holder released, waiter's prepare may sweep the holder's temps.

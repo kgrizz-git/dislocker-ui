@@ -25,6 +25,8 @@ _(none)_
 - `.gitignore` ignores `.superpowers/` SDD scratch.
 - Elevation uses `elevation_transaction()` (per-user flock + thread lock) around
   prepare+run; overlapping-elevation regression covered in `test_elevate`.
+- Overlapping-elevation test records thread observations without assert-in-try
+  (Sonar `python:S5779` / reliability gate).
 
 ## [0.1.6] - 2026-07-31
 
