@@ -23,6 +23,8 @@ _(none)_
 
 - Coverage includes elevate/privileged/ntfs_mount (runner still omitted).
 - `.gitignore` ignores `.superpowers/` SDD scratch.
+- Elevation uses `elevation_transaction()` (per-user flock + thread lock) around
+  prepare+run; overlapping-elevation regression covered in `test_elevate`.
 
 ## [0.1.6] - 2026-07-31
 

@@ -32,6 +32,9 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 - Elevation preflight refuses symlink or group/world-writable `src/` /
   Application Support directories.
 - Request/log files are mode 0600; log open uses `O_NOFOLLOW` + `fstat` checks.
+- Elevation prepare+run is serialized with a per-user lock so a concurrent
+  mount/unmount cannot delete another transaction's request or log file while
+  an authorization dialog is pending.
 - Residual risk documented: BitLocker secrets still appear briefly on
   `dislocker-fuse` argv (visible to `ps`). Elevating from a user-writable checkout
   is no stronger than `sudo ./run.sh`.

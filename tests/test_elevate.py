@@ -106,10 +106,91 @@ def test_sweep_stale_elevation_files(tmp_path: Path) -> None:
     (tmp_path / "dislocker-ui-log-xyz.log").write_text("x", encoding="utf-8")
     keep = tmp_path / "active_session.json"
     keep.write_text("{}", encoding="utf-8")
+    lock = tmp_path / "dislocker-ui-elevate.lock"
+    lock.write_text("", encoding="utf-8")
     _sweep_stale_elevation_files(tmp_path)
     assert not (tmp_path / "dislocker-ui-req-abc.json").exists()
     assert not (tmp_path / "dislocker-ui-log-xyz.log").exists()
     assert keep.exists()
+    assert lock.exists()
+
+
+def test_overlapping_elevation_transactions_are_serialized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    A second elevation_transaction waits; it must not sweep the holder's files.
+
+    Regression for concurrent prepare sweeps deleting an in-flight request/log.
+    """
+    import threading
+    import time
+
+    from dislocker_ui.elevate import elevation_transaction
+
+    support = tmp_path / "Application Support" / "dislocker-ui"
+    support.mkdir(parents=True)
+    monkeypatch.setattr(
+        "dislocker_ui.session.default_session_path",
+        lambda: support / "active_session.json",
+    )
+    monkeypatch.setattr(
+        "dislocker_ui.elevate.assert_safe_path_for_elevation",
+        lambda path, *, label: None,
+    )
+
+    holder_ready = threading.Event()
+    release_holder = threading.Event()
+    waiter_entered = threading.Event()
+    errors: list[BaseException] = []
+    holder_log: list[Path] = []
+    waiter_log: list[Path] = []
+
+    def holder() -> None:
+        try:
+            with elevation_transaction() as (_sess, log_path):
+                # Mimic an in-flight request sitting beside the log.
+                req = support / "dislocker-ui-req-holder.json"
+                req.write_text('{"secret":"x"}', encoding="utf-8")
+                holder_log.append(log_path)
+                holder_ready.set()
+                assert release_holder.wait(timeout=5.0)
+                assert log_path.exists(), "holder log deleted while lock held"
+                assert req.exists(), "holder request deleted while lock held"
+        except BaseException as exc:
+            errors.append(exc)
+
+    def waiter() -> None:
+        try:
+            assert holder_ready.wait(timeout=5.0)
+            with elevation_transaction() as (_sess, log_path):
+                waiter_log.append(log_path)
+                waiter_entered.set()
+        except BaseException as exc:
+            errors.append(exc)
+
+    t_hold = threading.Thread(target=holder)
+    t_wait = threading.Thread(target=waiter)
+    t_hold.start()
+    t_wait.start()
+    assert holder_ready.wait(timeout=5.0)
+    # Waiter must block while the holder still owns the lock.
+    time.sleep(0.2)
+    assert not waiter_entered.is_set()
+    assert holder_log[0].exists()
+    assert (support / "dislocker-ui-req-holder.json").exists()
+    release_holder.set()
+    t_hold.join(timeout=5.0)
+    t_wait.join(timeout=5.0)
+    assert not t_hold.is_alive() and not t_wait.is_alive()
+    assert not errors, f"thread errors: {errors}"
+    assert waiter_entered.is_set()
+    assert waiter_log
+    # After the holder released, waiter's prepare may sweep the holder's temps.
+    assert not (support / "dislocker-ui-req-holder.json").exists()
+    assert not holder_log[0].exists()
+    assert waiter_log[0].exists()
+    waiter_log[0].unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize(

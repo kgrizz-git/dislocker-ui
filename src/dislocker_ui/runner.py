@@ -80,7 +80,7 @@ def mount_volume(
     Public facade: on Darwin when not root, dispatches through elevate.py.
     Privileged child calls this with elevated=True and euid==0 (no re-entry).
     """
-    from dislocker_ui.elevate import needs_elevation, prepare_elevation_paths, run_elevated_mount
+    from dislocker_ui.elevate import elevation_transaction, needs_elevation, run_elevated_mount
 
     if not elevated and needs_elevation():
         # Reject an already-active session here, before prompting for admin
@@ -91,15 +91,17 @@ def mount_volume(
                 "A session is already active. Click Unmount before mounting again.\n"
                 f"NTFS mount: {existing.ntfs_mount}"
             )
-        sess_path, log_path = prepare_elevation_paths()
-        target = session_path or sess_path
-        return run_elevated_mount(
-            req,
-            deps,
-            log,
-            session_path=target,
-            log_path=log_path,
-        )
+        # Hold the per-user lock across prepare + osascript so a concurrent
+        # elevation cannot sweep this transaction's request/log files.
+        with elevation_transaction() as (sess_path, log_path):
+            target = session_path or sess_path
+            return run_elevated_mount(
+                req,
+                deps,
+                log,
+                session_path=target,
+                log_path=log_path,
+            )
 
     return _mount_in_process(
         req,
@@ -213,16 +215,16 @@ def unmount_volume(
     When the session was created via elevation and we are not root, re-elevate
     (second admin prompt — accepted for 0.2.0).
     """
-    from dislocker_ui.elevate import needs_elevation, prepare_elevation_paths, run_elevated_unmount
+    from dislocker_ui.elevate import elevation_transaction, needs_elevation, run_elevated_unmount
 
     session = load_session(session_path)
     if session is None:
         raise RunnerError("No active session found to unmount")
 
     if session.elevated and needs_elevation():
-        sess_path, log_path = prepare_elevation_paths()
-        target = session_path or sess_path
-        run_elevated_unmount(deps, log, session_path=target, log_path=log_path)
+        with elevation_transaction() as (sess_path, log_path):
+            target = session_path or sess_path
+            run_elevated_unmount(deps, log, session_path=target, log_path=log_path)
         return
 
     errors: list[str] = []

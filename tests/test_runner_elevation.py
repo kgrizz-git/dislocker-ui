@@ -11,6 +11,8 @@ Requirements:
 
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -26,6 +28,16 @@ from dislocker_ui.runner import (
     unmount_volume,
 )
 from dislocker_ui.session import MountSession
+
+
+def _fake_elevation_transaction(session_path: Path, log_path: Path):
+    """Return a callable matching elevate.elevation_transaction for facade tests."""
+
+    @contextlib.contextmanager
+    def _cm() -> Iterator[tuple[Path, Path]]:
+        yield session_path, log_path
+
+    return _cm
 
 
 def _deps() -> DepsStatus:
@@ -51,8 +63,8 @@ def test_mount_dispatches_to_elevate_when_needed() -> None:
         patch("dislocker_ui.elevate.needs_elevation", return_value=True),
         patch("dislocker_ui.runner.load_session", return_value=None),
         patch(
-            "dislocker_ui.elevate.prepare_elevation_paths",
-            return_value=(Path("/tmp/s.json"), Path("/tmp/l.log")),
+            "dislocker_ui.elevate.elevation_transaction",
+            _fake_elevation_transaction(Path("/tmp/s.json"), Path("/tmp/l.log")),
         ),
         patch("dislocker_ui.elevate.run_elevated_mount", return_value=session) as elev,
         patch("dislocker_ui.runner._mount_in_process") as inproc,
@@ -86,12 +98,12 @@ def test_mount_rejects_active_session_before_elevating() -> None:
         patch("dislocker_ui.elevate.needs_elevation", return_value=True),
         patch("dislocker_ui.runner.load_session", return_value=existing),
         patch("dislocker_ui.elevate.run_elevated_mount") as elev,
-        patch("dislocker_ui.elevate.prepare_elevation_paths") as prep,
+        patch("dislocker_ui.elevate.elevation_transaction") as txn,
     ):
         with pytest.raises(RunnerError, match="already active"):
             mount_volume(req, deps, lambda _m: None)
     elev.assert_not_called()
-    prep.assert_not_called()
+    txn.assert_not_called()
 
 
 def test_mount_in_process_when_already_root() -> None:
@@ -130,8 +142,8 @@ def test_unmount_reelevates_when_session_elevated() -> None:
         patch("dislocker_ui.runner.load_session", return_value=session),
         patch("dislocker_ui.elevate.needs_elevation", return_value=True),
         patch(
-            "dislocker_ui.elevate.prepare_elevation_paths",
-            return_value=(Path("/tmp/s.json"), Path("/tmp/l.log")),
+            "dislocker_ui.elevate.elevation_transaction",
+            _fake_elevation_transaction(Path("/tmp/s.json"), Path("/tmp/l.log")),
         ),
         patch("dislocker_ui.elevate.run_elevated_unmount") as elev,
     ):

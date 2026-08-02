@@ -14,7 +14,9 @@ Inputs:
 Outputs:
   MountSession on elevated mount success; raises ElevationCancelled,
   ElevationTimedOut, or RunnerError on failure. Side effects: temporary
-  request file (always unlinked), osascript admin prompt.
+  request file (always unlinked), osascript admin prompt. Concurrent
+  elevation is serialized with a per-user flock + thread lock so a second
+  prepare cannot sweep another transaction's request/log files.
 
 Requirements:
   macOS ``/usr/bin/osascript``; absolute sys.executable and PYTHONPATH embedded
@@ -25,6 +27,7 @@ Requirements:
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import os
 import re
@@ -32,9 +35,11 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
+from dislocker_ui import session as session_mod
 from dislocker_ui.deps import DepsStatus
 from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod
 from dislocker_ui.session import MountSession, load_session
@@ -53,6 +58,10 @@ _EXIT_REASONS = {2: "request validation", 3: "mount/unmount", 4: "unexpected"}
 _TIMED_OUT_MSG = (
     "Administrator authorization timed out. Try again and complete the prompt promptly."
 )
+# Serialize prepare+run across threads (flock alone is not thread-safe in-process)
+# and across processes (flock) so a second elevation cannot sweep the first's files.
+_ELEVATION_THREAD_LOCK = threading.RLock()
+_ELEVATION_LOCK_NAME = "dislocker-ui-elevate.lock"
 
 
 class ElevationCancelled(RunnerError):
@@ -130,15 +139,31 @@ def run_elevated_unmount(
         _unlink_quiet(log_path)
 
 
+@contextlib.contextmanager
+def elevation_transaction() -> Iterator[tuple[Path, Path]]:
+    """
+    Hold the per-user elevation lock for one prepare + privileged-run cycle.
+
+    Acquire before the stale-file sweep; release only after ``run_elevated_mount``
+    / ``run_elevated_unmount`` returns (caller must keep the ``with`` block open
+    for the full elevated operation). Prevents a concurrent prepare from deleting
+    another transaction's request or log file while an auth dialog is pending.
+    """
+    session_path = session_mod.default_session_path()
+    with _elevation_lock(session_path.parent):
+        yield prepare_elevation_paths()
+
+
 def prepare_elevation_paths() -> tuple[Path, Path]:
     """
     Prepare user-owned session directory and an ephemeral 0600 log file.
 
     Returns (session_path, log_path). Does not create a placeholder session file.
-    """
-    from dislocker_ui.session import default_session_path
 
-    session_path = default_session_path()
+    Callers that run osascript afterward must use :func:`elevation_transaction`
+    so the stale-file sweep cannot race another elevation.
+    """
+    session_path = session_mod.default_session_path()
     assert_safe_path_for_elevation(session_path.parent, label="Application Support")
     package_dir = Path(__file__).resolve().parent
     src_root = package_dir.parent
@@ -161,6 +186,28 @@ def prepare_elevation_paths() -> tuple[Path, Path]:
     finally:
         os.close(fd)
     return session_path, Path(name)
+
+
+@contextlib.contextmanager
+def _elevation_lock(directory: Path) -> Iterator[None]:
+    """
+    Exclusive per-user lock: threading.RLock (in-process) + fcntl.flock (IPC).
+
+    The lock file lives beside session/request temps and is never swept.
+    """
+    lock_path = directory / _ELEVATION_LOCK_NAME
+    with _ELEVATION_THREAD_LOCK:
+        # O_NOFOLLOW: refuse a symlinked lock path under Application Support.
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def _sweep_stale_elevation_files(directory: Path) -> None:
