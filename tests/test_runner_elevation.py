@@ -81,14 +81,14 @@ def test_mount_rejects_active_session_before_elevating() -> None:
         used_ntfs3g=True,
         elevated=True,
     )
-    with (
+    with (  # noqa: SIM117 (keep pytest.raises scoped to the single call under test)
         patch("dislocker_ui.elevate.needs_elevation", return_value=True),
         patch("dislocker_ui.runner.load_session", return_value=existing),
         patch("dislocker_ui.elevate.run_elevated_mount") as elev,
         patch("dislocker_ui.elevate.prepare_elevation_paths") as prep,
-        pytest.raises(RunnerError, match="already active"),
     ):
-        mount_volume(req, _deps(), lambda _m: None)
+        with pytest.raises(RunnerError, match="already active"):
+            mount_volume(req, _deps(), lambda _m: None)
     elev.assert_not_called()
     prep.assert_not_called()
 

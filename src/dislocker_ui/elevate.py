@@ -87,7 +87,7 @@ def run_elevated_mount(
         req=req,
     )
     try:
-        _run_osascript(request_path, action="mount", log=log)
+        _run_osascript(request_path, action="mount", log=log, log_path=log_path)
         session = load_session(session_path)
         if session is None:
             raise RunnerError(
@@ -120,7 +120,7 @@ def run_elevated_unmount(
         req=None,
     )
     try:
-        _run_osascript(request_path, action="unmount", log=log)
+        _run_osascript(request_path, action="unmount", log=log, log_path=log_path)
     finally:
         _unlink_quiet(request_path)
         _unlink_quiet(log_path)
@@ -142,7 +142,12 @@ def prepare_elevation_paths() -> tuple[Path, Path]:
     # imports from and its parent against symlink/world-writable tampering.
     assert_safe_path_for_elevation(src_root, label="package src")
     assert_safe_path_for_elevation(package_dir, label="package dir")
-    fd, name = tempfile.mkstemp(prefix="dislocker-ui-log-", suffix=".log")
+    # Keep the log beside the session file in the validated, user-owned
+    # Application Support dir so the privileged child can confine every path it
+    # touches under one trusted base (not a world-shared temp dir).
+    fd, name = tempfile.mkstemp(
+        prefix="dislocker-ui-log-", suffix=".log", dir=str(session_path.parent)
+    )
     try:
         os.fchmod(fd, 0o600)
     finally:
@@ -295,7 +300,9 @@ def _write_request(
     req: MountRequest | None,
 ) -> Path:
     """Create a mode-0600 request JSON; secret is inserted last when present."""
-    fd, name = tempfile.mkstemp(prefix="dislocker-ui-req-", suffix=".json")
+    fd, name = tempfile.mkstemp(
+        prefix="dislocker-ui-req-", suffix=".json", dir=str(session_path.parent)
+    )
     path = Path(name)
     try:
         os.fchmod(fd, 0o600)
@@ -332,13 +339,11 @@ def _write_request(
     return path
 
 
-def _run_osascript(request_path: Path, *, action: str, log: LogFn) -> None:
+def _run_osascript(request_path: Path, *, action: str, log: LogFn, log_path: Path) -> None:
     """Invoke osascript; raise classified errors on non-zero exit."""
     shell_cmd = build_privileged_shell_command(action, request_path)
     script = build_osascript(shell_cmd)
     log("Requesting administrator privileges…")
-    # log_path is inside the request; recover from request JSON for tails on failure
-    log_path = _log_path_from_request(request_path)
     completed = subprocess.run(
         [_OSASCRIPT, "-e", script],
         check=False,
@@ -349,15 +354,6 @@ def _run_osascript(request_path: Path, *, action: str, log: LogFn) -> None:
         return
     stderr = completed.stderr or completed.stdout or ""
     raise classify_osascript_failure(stderr, log_path=log_path)
-
-
-def _log_path_from_request(request_path: Path) -> Path | None:
-    """Read log_path from the request file when still present."""
-    try:
-        raw = json.loads(request_path.read_text(encoding="utf-8"))
-        return Path(raw["log_path"])
-    except (OSError, KeyError, TypeError, json.JSONDecodeError):
-        return None
 
 
 def _tail_log(log_path: Path | None) -> str:

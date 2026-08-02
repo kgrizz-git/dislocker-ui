@@ -73,7 +73,8 @@ def test_quoting_handles_spaces_quotes_dollar_backticks(tmp_path: Path) -> None:
     tricky.write_text("{}", encoding="utf-8")
     cmd = build_privileged_shell_command("mount", tricky)
     assert "cd / &&" in cmd
-    assert "-s" in cmd and "-P" in cmd
+    assert "-s" in cmd
+    assert "-P" in cmd
     assert "dislocker_ui.privileged" in cmd
     # After shlex.quote the dangerous characters are inside single quotes.
     assert "$" in cmd or "'$" in cmd or "\\$" in cmd
@@ -215,18 +216,18 @@ def test_run_elevated_mount_cancel_unlinks_request(tmp_path: Path) -> None:
             {"returncode": 1, "stderr": "User canceled. (-128)", "stdout": ""},
         )()
 
-    with (
+    with (  # noqa: SIM117 (keep pytest.raises scoped to the single call under test)
         patch("dislocker_ui.elevate.tempfile.mkstemp", side_effect=tracking_mkstemp),
         patch("dislocker_ui.elevate.subprocess.run", side_effect=fake_run),
-        pytest.raises(ElevationCancelled),
     ):
-        run_elevated_mount(
-            req,
-            _deps(),
-            lambda _m: None,
-            session_path=session_path,
-            log_path=log_path,
-        )
+        with pytest.raises(ElevationCancelled):
+            run_elevated_mount(
+                req,
+                _deps(),
+                lambda _m: None,
+                session_path=session_path,
+                log_path=log_path,
+            )
     assert created
     assert not created[0].exists()
 

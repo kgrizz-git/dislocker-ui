@@ -26,6 +26,7 @@ import argparse
 import contextlib
 import json
 import os
+import pwd
 import re
 import stat
 import sys
@@ -71,25 +72,32 @@ def main(argv: list[str] | None = None) -> int:
     try:
         payload = _load_and_unlink_request(args.request)
         _validate_request(payload, expected_action=args.action)
-        log_fp = _open_log(Path(payload["log_path"]), owner_uid=int(payload["uid"]))
+
+        uid = int(payload["uid"])
+        gid = int(payload["gid"])
+        # Confine every filesystem path this root process touches under the
+        # invoking user's own Application Support dir, derived from the system
+        # passwd database (trusted) rather than the request (attacker-influenced).
+        base = _user_base(uid)
+        session_path = _confine_under_base(payload["session_path"], base, label="session_path")
+        log_path = _confine_under_base(payload["log_path"], base, label="log_path")
+
+        log_fp = _open_log(log_path, owner_uid=uid)
         import time
 
         log_fp.write(
             f"audit ts={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} "
-            f"action={payload['action']} uid={payload['uid']} "
+            f"action={payload['action']} uid={uid} "
             f"volume={payload.get('volume', '')}\n"
         )
         log_fp.flush()
+        log_handle: TextIO = log_fp
 
         def log(message: str) -> None:
-            assert log_fp is not None
-            log_fp.write(message + "\n")
-            log_fp.flush()
+            log_handle.write(message + "\n")
+            log_handle.flush()
 
         deps = _deps_from_payload(payload["deps"])
-        session_path = Path(payload["session_path"])
-        uid = int(payload["uid"])
-        gid = int(payload["gid"])
 
         if args.action == "mount":
             req = _mount_request_from_payload(payload)
@@ -101,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
                 uid=uid,
                 gid=gid,
                 elevated=True,
-                fuse_log_path=Path(payload["log_path"]),
+                fuse_log_path=log_path,
             )
             _chown_session(session_path, uid, gid)
             log(f"privileged mount ok: {session.ntfs_mount}")
@@ -124,14 +132,45 @@ def main(argv: list[str] | None = None) -> int:
                 log_fp.close()
 
 
+def _user_base(uid: int) -> Path:
+    """
+    Return the invoking user's Application Support dir from the passwd database.
+
+    Derived from *uid* (a validated int) via the system passwd entry, so the
+    confinement base does not itself come from attacker-influenced request data.
+    """
+    try:
+        home = Path(pwd.getpwuid(uid).pw_dir)
+    except KeyError as exc:
+        raise _ValidationError(f"uid {uid} has no passwd entry") from exc
+    return (home / "Library" / "Application Support" / "dislocker-ui").resolve()
+
+
+def _confine_under_base(value: str, base: Path, *, label: str) -> Path:
+    """
+    Resolve *value* and require it to live inside *base* (no ``..`` escape).
+
+    Returns the realpath; raises _ValidationError if it escapes the base dir.
+    """
+    resolved = Path(os.path.realpath(value))
+    try:
+        resolved.relative_to(base)
+    except ValueError as exc:
+        raise _ValidationError(f"{label} escapes {base}: {value}") from exc
+    return resolved
+
+
 def _load_and_unlink_request(path: Path) -> dict[str, Any]:
     """Read request JSON then unlink promptly (secret lives only briefly)."""
+    if path.is_symlink():
+        raise _ValidationError("request path must not be a symlink")
+    safe = Path(os.path.realpath(path))
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = safe.read_text(encoding="utf-8")
     except OSError as exc:
         raise _ValidationError(f"cannot read request: {exc}") from exc
     with contextlib.suppress(OSError):
-        path.unlink(missing_ok=True)
+        safe.unlink(missing_ok=True)
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:

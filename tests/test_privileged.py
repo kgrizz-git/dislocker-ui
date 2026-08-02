@@ -107,8 +107,9 @@ def test_open_log_rejects_symlink(tmp_path: Path) -> None:
     os.chmod(real, 0o600)
     link = tmp_path / "link.log"
     link.symlink_to(real)
+    uid = os.getuid()
     with pytest.raises(Exception, match="log"):
-        _open_log(link, owner_uid=os.getuid())
+        _open_log(link, owner_uid=uid)
 
 
 def test_open_log_accepts_owner_mode(tmp_path: Path) -> None:
@@ -139,6 +140,7 @@ def test_main_mount_success(tmp_path: Path) -> None:
         patch("dislocker_ui.privileged.mount_volume", return_value=session) as mount,
         patch("dislocker_ui.privileged._chown_session"),
         patch("dislocker_ui.privileged.os.chdir"),
+        patch("dislocker_ui.privileged._user_base", return_value=tmp_path.resolve()),
     ):
         code = main(["mount", "--request", str(req)])
     assert code == EXIT_OK
@@ -159,6 +161,7 @@ def test_main_runner_error_exit_3(tmp_path: Path) -> None:
             side_effect=RunnerError("boom"),
         ),
         patch("dislocker_ui.privileged.os.chdir"),
+        patch("dislocker_ui.privileged._user_base", return_value=tmp_path.resolve()),
     ):
         assert main(["mount", "--request", str(req)]) == EXIT_RUNNER
 
@@ -174,6 +177,7 @@ def test_main_unexpected_exit_4(tmp_path: Path) -> None:
             side_effect=RuntimeError("surprise"),
         ),
         patch("dislocker_ui.privileged.os.chdir"),
+        patch("dislocker_ui.privileged._user_base", return_value=tmp_path.resolve()),
     ):
         assert main(["mount", "--request", str(req)]) == EXIT_UNEXPECTED
 
@@ -187,10 +191,47 @@ def test_main_never_calls_discover_deps(tmp_path: Path) -> None:
         patch("dislocker_ui.privileged.mount_volume", return_value=MagicMock(ntfs_mount="x")),
         patch("dislocker_ui.privileged._chown_session"),
         patch("dislocker_ui.privileged.os.chdir"),
+        patch("dislocker_ui.privileged._user_base", return_value=tmp_path.resolve()),
         patch("dislocker_ui.deps.discover_deps") as discover,
     ):
         assert main(["mount", "--request", str(req)]) == EXIT_OK
     discover.assert_not_called()
+
+
+def test_confine_under_base_accepts_and_rejects(tmp_path: Path) -> None:
+    """Paths inside the base resolve; paths escaping it raise."""
+    from dislocker_ui.privileged import _confine_under_base, _ValidationError
+
+    base = tmp_path.resolve()
+    inside = _confine_under_base(str(tmp_path / "active_session.json"), base, label="s")
+    assert inside == (base / "active_session.json")
+    with pytest.raises(_ValidationError, match="escapes"):
+        _confine_under_base("/etc/passwd", base, label="s")
+
+
+def test_main_rejects_session_path_escaping_base(tmp_path: Path) -> None:
+    """A session_path outside the user's base dir is rejected (exit 2)."""
+    payload = _mount_payload(tmp_path)
+    payload["session_path"] = "/etc/dislocker-evil.json"
+    req = tmp_path / "req.json"
+    req.write_text(json.dumps(payload), encoding="utf-8")
+    with (
+        patch("dislocker_ui.privileged.os.chdir"),
+        patch("dislocker_ui.privileged._user_base", return_value=tmp_path.resolve()),
+    ):
+        assert main(["mount", "--request", str(req)]) == EXIT_VALIDATION
+
+
+def test_load_and_unlink_request_rejects_symlink(tmp_path: Path) -> None:
+    """A symlinked request path is refused before it is read."""
+    from dislocker_ui.privileged import _load_and_unlink_request, _ValidationError
+
+    real = tmp_path / "real.json"
+    real.write_text("{}", encoding="utf-8")
+    link = tmp_path / "link.json"
+    link.symlink_to(real)
+    with pytest.raises(_ValidationError, match="symlink"):
+        _load_and_unlink_request(link)
 
 
 def test_format_unexpected_redacts_secret() -> None:

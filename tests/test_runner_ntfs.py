@@ -97,8 +97,9 @@ def test_assert_mount_owner_mismatch(tmp_path: Path) -> None:
 
     mnt = tmp_path / "mnt"
     mnt.mkdir()
+    other_uid = os.getuid() + 1
     with pytest.raises(RunnerError, match="ownership mismatch"):
-        assert_mount_owner(mnt, uid=os.getuid() + 1, gid=None, log=lambda _m: None)
+        assert_mount_owner(mnt, uid=other_uid, gid=None, log=lambda _m: None)
 
     """_mount_ntfs invokes ntfs-3g with assembled -o options (never kernel mount)."""
     req = MountRequest(
