@@ -4,7 +4,7 @@ Simple macOS GUI frontend for [dislocker](https://github.com/Aorimn/dislocker).
 It does **not** fork or reimplement BitLocker crypto — it shells out to an
 installed `dislocker-fuse` and then attaches/mounts the resulting NTFS image.
 
-**Version:** see `VERSION` (currently 0.1.5).
+**Version:** see `VERSION` (currently 0.2.0).
 
 Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
@@ -12,8 +12,13 @@ Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
 ## What it does
 
 1. Unlock a BitLocker volume with a user password, recovery password, or `.bek` file.
-2. Mount the decrypted NTFS image under `/Volumes` (read-only by default).
+2. Mount the decrypted NTFS image under `/Volumes` via **ntfs-3g** (read-only by default).
 3. Unmount cleanly (NTFS → detach raw disk → unmount FUSE).
+
+On modern macOS the GUI is unprivileged; Mount/Unmount request **administrator
+privileges** (macOS password dialog) so the full pipeline can open `/dev/disk*`
+and mount under `/Volumes`. Cancel and timeout have distinct messages. Unmount
+of an elevated session asks for admin again (two prompts per cycle).
 
 ## Requirements
 
@@ -22,8 +27,8 @@ Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
 | macOS | Yes | Target platform |
 | Python 3.10+ with tkinter | Yes | GUI |
 | [dislocker](https://github.com/Aorimn/dislocker) | Yes | BitLocker unlock (`dislocker-fuse`) |
-| macFUSE or FUSE-T | Yes | Needed by dislocker (and by ntfs-3g if used) |
-| `ntfs-3g` | Optional | Writable NTFS mounts in Finder |
+| **macFUSE** | Yes | Required for dislocker + ntfs-3g options used here (`allow_other` / `local` / uid). **FUSE-T is not validated in 0.2.0.** |
+| **`ntfs-3g`** | **Yes** | RO and RW NTFS mounts (kernel `mount_ntfs` is missing on recent macOS) |
 
 This project does **not** bundle FUSE or ntfs-3g (system extensions / installers).
 
@@ -57,7 +62,7 @@ brew tap gromgit/homebrew-fuse
 #   brew trust --formula gromgit/fuse/dislocker-mac
 #   brew trust --formula gromgit/fuse/ntfs-3g-mac
 brew install gromgit/fuse/dislocker-mac
-brew install gromgit/fuse/ntfs-3g-mac   # optional but needed for Finder write
+brew install gromgit/fuse/ntfs-3g-mac   # required for mounts on modern macOS
 ```
 
 Confirm:
@@ -80,14 +85,15 @@ ln -sf /opt/homebrew/opt/mbedtls@3/lib/libmbedcrypto.16.dylib \
 
 (That symlink can break on `brew upgrade`; re-run if dislocker stops loading.)
 
-Then click **Recheck deps** in dislocker-ui (or restart it). Uncheck Read-only
-only when `ntfs-3g` is found.
+Then click **Recheck deps** in dislocker-ui (or restart it). Without `ntfs-3g`,
+Mount is unavailable. Uncheck Read-only when you need writes.
 
 Notes:
 
 - Community taps are unsupported by Homebrew.
-- Writable mounts may still need Full Disk Access / admin rights depending on
-  your macOS version.
+- Mounts need administrator authorization (macOS dialog). Running
+  `sudo ./run.sh` remains a power-user escape hatch (already-root path skips
+  osascript). Elevating from a user-writable checkout is no stronger than that.
 
 ### 4. This app
 
@@ -117,34 +123,42 @@ PYTHONPATH=src python3 -m dislocker_ui
 
 3. Select a volume (or type `/dev/diskXsY`).
 4. Choose unlock method: user password, recovery password, or `.bek` file.
-5. Leave **Read-only** checked unless ntfs-3g is installed and you need writes.
-6. Click **Mount**. When it succeeds, open the path under `/Volumes` (shown in
-   the dialog / status line).
-7. When finished, click **Unmount** before ejecting the disk or shutting down.
+5. Leave **Read-only** checked unless you need writes (ntfs-3g required either way).
+6. Click **Mount**, complete the macOS administrator prompt, then open the path
+   under `/Volumes` (shown in the dialog / status line).
+7. When finished, click **Unmount** (second admin prompt if the session was
+   elevated) before ejecting the disk or shutting down.
 
-Raw-disk access often needs admin rights. If mount fails with permission errors,
-run from a terminal where you can authenticate, or adjust device permissions
-carefully for your use case.
+Already-root / `sudo ./run.sh` skips the osascript dialog and mounts in-process.
 
 ## Read vs write
 
 | Goal | What you need |
 |------|----------------|
-| Browse files (read) | dislocker + FUSE + stock macOS NTFS mount |
-| Edit/copy onto the volume (write) | above + `ntfs-3g` (or other writable NTFS) |
+| Browse files (read) | dislocker + macFUSE + **ntfs-3g** (`-o ro`) |
+| Edit/copy onto the volume (write) | same + uncheck Read-only |
 
 - **Dislocker** handles BitLocker. With `-r` (this app’s default) the FUSE layer
   is read-only as well.
-- **Stock macOS NTFS** is usually read-only in Finder even when dislocker would
-  allow writes.
-- Uncheck Read-only in the UI only when `ntfs-3g` is detected.
+- **ntfs-3g** is required for both RO and RW on modern macOS (no `mount_ntfs`).
+- Mount options include `umask=077` with `allow_other` so other local accounts
+  cannot read the decrypted volume.
 
 ## Safety notes
 
 - Default mount mode is **read-only**.
-- Passwords are passed to `dislocker-fuse` as CLI arguments (visible briefly in
-  process listings). Prefer a private machine and unmount when finished.
+- Passwords / recovery keys are passed to `dislocker-fuse` as CLI arguments
+  (visible briefly in process listings / `ps`). Prefer a private machine and
+  unmount when finished. Secrets are **not** placed in AppleScript; they travel
+  briefly in a mode-0600 request file during elevation.
+- Elevation writes its mode-0600 request/log files under your
+  `Library/Application Support/dislocker-ui/` folder (a persistent, user-only
+  dir, so the privileged child can confine every path it touches). They are
+  unlinked after each operation, and any left by a killed run are swept on the
+  next Mount/Unmount.
 - Always use **Unmount** in the app before ejecting the disk or sleeping the Mac.
+- Elevation does not harden a world-writable source tree — treat
+  `sudo ./run.sh` and elevating this checkout similarly.
 
 ## Layout
 

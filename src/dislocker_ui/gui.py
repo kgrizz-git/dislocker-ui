@@ -24,6 +24,7 @@ from tkinter import filedialog, messagebox, ttk
 from dislocker_ui import __version__
 from dislocker_ui.deps import DepsStatus, discover_deps
 from dislocker_ui.disks import DiskEntry, list_disk_entries
+from dislocker_ui.elevate import ElevationCancelled, ElevationTimedOut
 from dislocker_ui.runner import (
     MountRequest,
     RunnerError,
@@ -141,8 +142,10 @@ class DislockerApp(ttk.Frame):
     def _refresh_deps_label(self) -> None:
         """Update the dependency summary line."""
         if self.deps.core_ok:
-            write = "RW available (ntfs-3g found)" if self.deps.can_write else "RW needs ntfs-3g"
-            text = f"dislocker: {self.deps.dislocker_fuse}\nCore tools OK. {write}."
+            text = (
+                f"dislocker: {self.deps.dislocker_fuse}\n"
+                "Core tools OK (ntfs-3g required for RO and RW mounts)."
+            )
         else:
             missing = ", ".join(self.deps.missing_core())
             text = f"Missing required tools: {missing}. See README."
@@ -155,7 +158,10 @@ class DislockerApp(ttk.Frame):
             self.readonly_check.configure(state=tk.NORMAL)
         else:
             self.readonly_var.set(True)
-            self.rw_hint.configure(text="ntfs-3g not found — only read-only mounts are offered.")
+            self.rw_hint.configure(
+                text="ntfs-3g not found — mounts are unavailable until it is installed."
+            )
+            self.readonly_check.configure(state=tk.DISABLED)
 
     def _on_method_change(self) -> None:
         """Toggle password vs BEK browse UI."""
@@ -251,6 +257,25 @@ class DislockerApp(ttk.Frame):
                         "Mounted", f"Available at:\n{path}"
                     ),
                 )
+            except ElevationCancelled as exc:
+                self.log(f"Cancelled: {exc}")
+                self.master.after(
+                    0,
+                    lambda: messagebox.showinfo(
+                        "Cancelled",
+                        "Administrator authorization was cancelled. Nothing was mounted.",
+                    ),
+                )
+            except ElevationTimedOut as exc:
+                self.log(f"ERROR: {exc}")
+                self.master.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "Authorization timed out",
+                        "The administrator prompt timed out. Try Mount again "
+                        "and complete the password dialog promptly.",
+                    ),
+                )
             except RunnerError as exc:
                 self.log(f"ERROR: {exc}")
                 err = str(exc)
@@ -276,6 +301,25 @@ class DislockerApp(ttk.Frame):
             try:
                 unmount_volume(self.deps, self.log)
                 self.master.after(0, lambda: messagebox.showinfo("Unmounted", "Volume unmounted."))
+            except ElevationCancelled as exc:
+                self.log(f"Cancelled: {exc}")
+                self.master.after(
+                    0,
+                    lambda: messagebox.showinfo(
+                        "Cancelled",
+                        "Administrator authorization was cancelled. "
+                        "The volume may still be mounted.",
+                    ),
+                )
+            except ElevationTimedOut as exc:
+                self.log(f"ERROR: {exc}")
+                self.master.after(
+                    0,
+                    lambda: messagebox.showerror(
+                        "Authorization timed out",
+                        "The administrator prompt timed out. Try Unmount again.",
+                    ),
+                )
             except RunnerError as exc:
                 self.log(f"ERROR: {exc}")
                 err = str(exc)

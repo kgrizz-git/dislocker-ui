@@ -13,16 +13,4 @@ Open work only for **dislocker-ui**.
 
 ## Active
 
-### macOS elevation (target 0.2.0)
-
-Plan: [`plans/macos-elevation.md`](plans/macos-elevation.md)
-
-- [ ] Create branch `feature/macos-elevation` from `main`
-- [ ] Make `ntfs-3g` required on Darwin; replace kernel `mount -t ntfs` with ntfs-3g (`ro`/`rw` + `allow_other,local,uid,gid,volname`)
-- [ ] Add `elevate.py` (Darwin `euid != 0`, two-layer quoting, osascript + 600s timeout, cancel `-128`)
-- [ ] Add `privileged.py`; serialize `DepsStatus`; use `sys.executable` + `PYTHONPATH`; user-owned request `mkstemp` lifecycle
-- [ ] Add `MountSession.elevated`; plumb `session_path` through all runner call sites including cleanup
-- [ ] Elevated path: dislocker-fuse log-file redirect + `start_new_session`; wait errors from log tail
-- [ ] Route mount/unmount through elevation when Darwin and not root; in-process fallback when already root
-- [ ] Unit tests in `elevate` / `privileged`; Darwin no-auth osascript round-trip; secret-absence assertion
-- [ ] Bump to 0.2.0; update CHANGELOG / README / AGENTS; macFUSE caveat; two-prompt note
+_(none)_

@@ -31,13 +31,12 @@ from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod
 from dislocker_ui.session import MountSession
 
 
-def _core_deps(*, ntfs3g: str | None = None) -> DepsStatus:
-    """Return a DepsStatus with all core tools present."""
+def _core_deps(*, ntfs3g: str | None = "/bin/ntfs-3g") -> DepsStatus:
+    """Return a DepsStatus with all core tools present (ntfs-3g required)."""
     return DepsStatus(
         dislocker_fuse="/bin/dislocker-fuse",
         hdiutil="/bin/hdiutil",
         diskutil="/bin/diskutil",
-        mount="/bin/mount",
         umount="/bin/umount",
         ntfs3g=ntfs3g,
     )
@@ -49,7 +48,6 @@ def _missing_deps() -> DepsStatus:
         dislocker_fuse=None,
         hdiutil="/bin/hdiutil",
         diskutil="/bin/diskutil",
-        mount="/bin/mount",
         umount="/bin/umount",
         ntfs3g=None,
     )
@@ -155,11 +153,20 @@ def test_init_shows_core_ok_and_no_session(tk_root: tk.Tk) -> None:
     """Startup populates deps text, disks, and empty-session status."""
     app = _build_app(tk_root, deps=_core_deps())
     assert "Core tools OK" in app.deps_label.cget("text")
-    assert "RW needs ntfs-3g" in app.deps_label.cget("text")
+    assert "ntfs-3g" in app.deps_label.cget("text")
+    assert "RW needs ntfs-3g" not in app.deps_label.cget("text")
     assert app.status_var.get() == "No active session"
     assert app.volume_var.get() == "/dev/disk2s1  (WIN, 64.0 GB)"
     assert app.readonly_var.get() is True
-    assert "only read-only" in app.rw_hint.cget("text")
+    assert "writable" in app.rw_hint.cget("text")
+
+
+def test_rw_hint_when_ntfs3g_missing(tk_root: tk.Tk) -> None:
+    """Without ntfs-3g, hint says mounts are unavailable (not RO-only)."""
+    app = _build_app(tk_root, deps=_core_deps(ntfs3g=None))
+    assert "unavailable" in app.rw_hint.cget("text")
+    assert "only read-only" not in app.rw_hint.cget("text")
+    assert str(app.readonly_check.cget("state")) == str(tk.DISABLED)
 
 
 def test_init_missing_deps_label(tk_root: tk.Tk) -> None:
@@ -181,7 +188,7 @@ def test_init_active_session_status(tk_root: tk.Tk) -> None:
 def test_rw_available_when_ntfs3g_present(tk_root: tk.Tk) -> None:
     """ntfs-3g unlocks the writable mount option and hint text."""
     app = _build_app(tk_root, deps=_core_deps(ntfs3g="/bin/ntfs-3g"))
-    assert "RW available" in app.deps_label.cget("text")
+    assert "Core tools OK" in app.deps_label.cget("text")
     assert "writable" in app.rw_hint.cget("text")
     assert str(app.readonly_check.cget("state")) == str(tk.NORMAL)
 
@@ -264,7 +271,7 @@ def test_recheck_deps_refreshes_label(tk_root: tk.Tk) -> None:
     ):
         app._recheck_deps()
     assert "Core tools OK" in app.deps_label.cget("text")
-    assert "RW available" in app.deps_label.cget("text")
+    assert "ntfs-3g required" in app.deps_label.cget("text")
     assert "Dependency check refreshed" in app.log_text.get("1.0", tk.END)
 
 
@@ -336,6 +343,27 @@ def test_on_mount_error_shows_dialog(tk_root: tk.Tk, sync_threads: None, exc: Ex
     assert showerror.call_args.args[0] == "Mount failed"
     assert str(exc) in showerror.call_args.args[1]
     assert f"ERROR: {exc}" in app.log_text.get("1.0", tk.END)
+
+
+def test_on_mount_cancel_shows_info_dialog(tk_root: tk.Tk, sync_threads: None) -> None:
+    """ElevationCancelled uses a non-scary info dialog, not Mount failed."""
+    from dislocker_ui.elevate import ElevationCancelled
+
+    app = _build_app(tk_root)
+    with (
+        patch(
+            "dislocker_ui.gui.mount_volume",
+            side_effect=ElevationCancelled("cancelled"),
+        ),
+        patch("dislocker_ui.gui.messagebox.showinfo") as showinfo,
+        patch("dislocker_ui.gui.messagebox.showerror") as showerror,
+    ):
+        app.on_mount()
+
+    showerror.assert_not_called()
+    showinfo.assert_called_once()
+    assert showinfo.call_args.args[0] == "Cancelled"
+    assert "cancelled" in showinfo.call_args.args[1].lower()
 
 
 def test_on_unmount_success(tk_root: tk.Tk, sync_threads: None) -> None:

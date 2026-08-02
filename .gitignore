@@ -93,3 +93,4 @@ temp/
 
 # Pre-commit
 .pre-commit-cache/
+.superpowers/

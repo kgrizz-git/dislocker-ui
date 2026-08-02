@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.2.0] - 2026-07-31
+
+### Added
+
+- macOS administrator elevation for the full mount/unmount pipeline via
+  `osascript` (`do shell script … with administrator privileges`), keeping the
+  tkinter GUI unprivileged.
+- Privileged child module (`dislocker_ui.privileged`) with a mode-0600 request
+  file protocol (secrets never in AppleScript).
+- Distinct GUI dialogs for authorization cancel vs timeout.
+
+### Changed
+
+- **`ntfs-3g` is required** for both read-only and read/write mounts on modern
+  macOS (kernel `mount_ntfs` is unavailable). Stock `mount -t ntfs` path removed.
+- NTFS mounts use `allow_other,local,uid=,gid=,umask=077` (plus fmask/dmask) so
+  Finder can access elevated mounts without world-readable decrypted data.
+- Unmount of an elevated session prompts for admin privileges again (two prompts
+  per mount/unmount cycle).
+
+### Security
+
+- Elevation preflight refuses symlink or group/world-writable `src/` /
+  Application Support directories.
+- Request/log files are mode 0600; log open uses `O_NOFOLLOW` + `fstat` checks.
+- Elevation prepare+run is serialized with a per-user lock so a concurrent
+  mount/unmount cannot delete another transaction's request or log file while
+  an authorization dialog is pending.
+- Residual risk documented: BitLocker secrets still appear briefly on
+  `dislocker-fuse` argv (visible to `ps`). Elevating from a user-writable checkout
+  is no stronger than `sudo ./run.sh`.
+
+## [0.1.6] - 2026-07-31
+
+No user-facing changes; internal version alignment for the elevation track.
+Developer/harness details live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
+
 ## [0.1.5] - 2026-07-31
 
 ### Added
