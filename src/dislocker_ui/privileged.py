@@ -34,7 +34,7 @@ EXIT_OK = 0
 EXIT_VALIDATION = 2
 EXIT_RUNNER = 3
 EXIT_UNEXPECTED = 4
-_REQUEST_NAME_RE = re.compile(r"^dislocker-ui-req-[A-Za-z0-9_]{6,}\.json$")
+_REQUEST_NAME_RE = re.compile(r"^dislocker-ui-req-\w{6,}\.json$", re.ASCII)
 
 
 class _ValidationError(ValueError):

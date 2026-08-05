@@ -113,7 +113,6 @@ def run_elevated_mount(
 def run_elevated_unmount(
     log: LogFn,
     *,
-    session_path: Path,
     log_path: Path,
     request_dir: Path | None = None,
 ) -> None:

@@ -51,6 +51,10 @@ def _deps() -> DepsStatus:
     )
 
 
+def _log(_message: str) -> None:
+    """Discard log output in runner facade tests."""
+
+
 def test_mount_dispatches_to_elevate_when_needed() -> None:
     """Unprivileged Darwin path calls run_elevated_mount, not in-process."""
     req = MountRequest(
@@ -115,6 +119,7 @@ def test_mount_rejects_legacy_session_before_elevating() -> None:
         secret="x",
         readonly=True,
     )
+    deps = _deps()
     with (
         patch("dislocker_ui.elevate.needs_elevation", return_value=True),
         patch("dislocker_ui.runner.load_session", return_value=None),
@@ -122,19 +127,20 @@ def test_mount_rejects_legacy_session_before_elevating() -> None:
         patch("dislocker_ui.elevate.run_elevated_mount") as elev,
         pytest.raises(RunnerError, match=r"pre-0\.3\.0"),
     ):
-        mount_volume(req, _deps(), lambda _m: None)
+        mount_volume(req, deps, _log)
     elev.assert_not_called()
 
 
 def test_unmount_rejects_legacy_session_with_recovery_guidance() -> None:
     """An unversioned session record is not treated as absent mount state."""
+    deps = _deps()
     with (
         patch("dislocker_ui.elevate.needs_elevation", return_value=False),
         patch("dislocker_ui.runner.load_session", return_value=None),
         patch("dislocker_ui.runner.legacy_session_present", return_value=True),
         pytest.raises(RunnerError, match=r"pre-0\.3\.0"),
     ):
-        unmount_volume(_deps(), lambda _m: None)
+        unmount_volume(deps, _log)
 
 
 def test_unmount_uses_canonical_path_for_all_cleanup_state() -> None:

@@ -251,9 +251,8 @@ def unmount_volume(
         raise RunnerError("No active session found to unmount")
 
     if session.elevated and needs_elevation():
-        with elevation_transaction() as (sess_path, log_path):
-            target = session_path or sess_path
-            run_elevated_unmount(log, session_path=target, log_path=log_path)
+        with elevation_transaction() as (_sess_path, log_path):
+            run_elevated_unmount(log, log_path=log_path)
         return
 
     if session.elevated:
