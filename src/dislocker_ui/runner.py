@@ -38,6 +38,7 @@ from dislocker_ui.ntfs_mount import mount_ntfs as _mount_ntfs
 from dislocker_ui.session import MountSession, clear_session, load_session, save_session
 
 LogFn = Callable[[str], None]
+VOLUMES_ROOT = Path("/Volumes")
 
 
 class UnlockMethod(str, Enum):
@@ -72,7 +73,6 @@ def mount_volume(
     uid: int | None = None,
     gid: int | None = None,
     elevated: bool = False,
-    fuse_log_path: Path | None = None,
     fuse_log_handle: object | None = None,
 ) -> MountSession:
     """
@@ -114,7 +114,6 @@ def mount_volume(
         uid=uid,
         gid=gid,
         elevated=elevated,
-        fuse_log_path=fuse_log_path,
         fuse_log_handle=fuse_log_handle,
     )
 
@@ -128,7 +127,6 @@ def _mount_in_process(
     uid: int | None = None,
     gid: int | None = None,
     elevated: bool = False,
-    fuse_log_path: Path | None = None,
     fuse_log_handle: object | None = None,
 ) -> MountSession:
     """In-process mount pipeline (root / already elevated / non-Darwin)."""
@@ -171,7 +169,6 @@ def _mount_in_process(
             fuse_proc,
             log,
             timeout_s=45,
-            fuse_log_handle=fuse_log_handle if elevated else None,
         )
 
         log("Attaching raw NTFS image with hdiutil…")
@@ -436,8 +433,6 @@ def _wait_for_file(
     proc: subprocess.Popen[str],
     log: LogFn,
     timeout_s: float,
-    *,
-    fuse_log_handle: object | None = None,
 ) -> None:
     """Wait until dislocker-file exists or the fuse process exits."""
     deadline = time.time() + timeout_s
@@ -490,11 +485,11 @@ def _allocate_volume_path(label: str) -> Path:
     _validate_volume_label(label)
     for i in range(2, 50):
         suffix = "" if i == 2 else f"-{i - 1}"
-        candidate = Path("/Volumes") / f"{label}{suffix}"
+        candidate = VOLUMES_ROOT / f"{label}{suffix}"
         try:
             candidate.mkdir(mode=0o755)
             info = os.lstat(candidate)
-            if not candidate.parent == Path("/Volumes") or not info:
+            if candidate.parent != VOLUMES_ROOT or not info:
                 raise RunnerError("mountpoint creation escaped /Volumes")
             return candidate
         except FileExistsError:
@@ -586,5 +581,5 @@ def _validate_elevated_session(session: MountSession, session_path: Path | None)
     if not _is_privileged_fuse_path(Path(session.fuse_mount), session_path):
         raise RunnerError("Privileged session FUSE path is outside application staging")
     ntfs = Path(session.ntfs_mount)
-    if ntfs.parent != Path("/Volumes") or ntfs.name in {"", ".", ".."}:
+    if ntfs.parent != VOLUMES_ROOT or ntfs.name in {"", ".", ".."}:
         raise RunnerError("Privileged session NTFS mountpoint is unsafe")

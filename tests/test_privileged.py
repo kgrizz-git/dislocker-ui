@@ -57,8 +57,10 @@ def test_request_descriptor_loader_rejects_symlink(tmp_path: Path) -> None:
     real = _request(base, _payload())
     link = base / "dislocker-ui-req-link123.json"
     link.symlink_to(real)
+    name = _request_entry_name(link, base)
+    uid = os.getuid()
     with pytest.raises(_ValidationError, match="cannot read request"):
-        _load_and_unlink_request(_request_entry_name(link, base), base, os.getuid())
+        _load_and_unlink_request(name, base, uid)
 
 
 @pytest.mark.parametrize("value", ["relative.json", "/tmp/request.json"])
@@ -66,39 +68,44 @@ def test_request_entry_name_rejects_escape(value: str, tmp_path: Path) -> None:
     """The privileged child accepts one generated entry directly below its base."""
     base = tmp_path / "requests"
     base.mkdir(mode=0o700)
+    request = Path(value)
     with pytest.raises(_ValidationError):
-        _request_entry_name(Path(value), base)
+        _request_entry_name(request, base)
 
 
 def test_request_rejects_old_root_authority_fields() -> None:
     """Session, log, and dependency paths are never accepted from the request."""
     payload = _payload()
     payload["session_path"] = "/etc/passwd"
+    uid = os.getuid()
     with pytest.raises(_ValidationError, match="fields"):
-        _validate_request(payload, expected_action="mount", expected_uid=os.getuid())
+        _validate_request(payload, expected_action="mount", expected_uid=uid)
 
 
 @pytest.mark.parametrize("volume", ["/tmp/image.dmg", "/dev/rdisk2", "/dev/disk2/../x"])
 def test_request_rejects_nonphysical_volume(volume: str) -> None:
     payload = _payload()
     payload["volume"] = volume
+    uid = os.getuid()
     with pytest.raises(_ValidationError, match="physical"):
-        _validate_request(payload, expected_action="mount", expected_uid=os.getuid())
+        _validate_request(payload, expected_action="mount", expected_uid=uid)
 
 
 @pytest.mark.parametrize("label", ["../outside", "/Volumes/outside", "..", "bad/name", ""])
 def test_request_rejects_unsafe_volume_label(label: str) -> None:
     payload = _payload()
     payload["volume_label"] = label
+    uid = os.getuid()
     with pytest.raises(_ValidationError, match="label"):
-        _validate_request(payload, expected_action="mount", expected_uid=os.getuid())
+        _validate_request(payload, expected_action="mount", expected_uid=uid)
 
 
 def test_request_rejects_truthy_nonboolean_readonly() -> None:
     payload = _payload()
     payload["readonly"] = "true"
+    uid = os.getuid()
     with pytest.raises(_ValidationError, match="boolean"):
-        _validate_request(payload, expected_action="mount", expected_uid=os.getuid())
+        _validate_request(payload, expected_action="mount", expected_uid=uid)
 
 
 def test_main_fails_before_mount_when_trusted_deps_missing(tmp_path: Path) -> None:

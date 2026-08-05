@@ -379,9 +379,7 @@ def test_request_json_secret_is_last_key(tmp_path: Path) -> None:
     )
     path = _write_request(
         action="mount",
-        deps=_deps(),
         session_path=tmp_path / "s.json",
-        log_path=tmp_path / "l.log",
         req=req,
     )
     try:

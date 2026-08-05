@@ -94,9 +94,7 @@ def run_elevated_mount(
     validate_volume_path(req.volume)
     request_path = _write_request(
         action="mount",
-        deps=deps,
         session_path=session_path,
-        log_path=log_path,
         req=req,
     )
     try:
@@ -126,9 +124,7 @@ def run_elevated_unmount(
     """
     request_path = _write_request(
         action="unmount",
-        deps=deps,
         session_path=session_path,
-        log_path=log_path,
         req=None,
     )
     try:
@@ -334,9 +330,7 @@ def _parse_error_number(text: str) -> int | None:
 def _write_request(
     *,
     action: str,
-    deps: DepsStatus,
     session_path: Path,
-    log_path: Path,
     req: MountRequest | None,
 ) -> Path:
     """Create a mode-0600 request JSON; secret is inserted last when present."""
