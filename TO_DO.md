@@ -13,4 +13,5 @@ Open work only for **dislocker-ui**.
 
 ## Active
 
-_(none)_
+- [Privileged helper hardening](plans/2026-08-05-privileged-helper-hardening.md):
+  remediate the security audit findings in the elevated mount/unmount workflow.
