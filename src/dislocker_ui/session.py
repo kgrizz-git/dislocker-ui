@@ -70,8 +70,8 @@ def ensure_root_state_dir(uid: int, gid: int, *, state_root: Path = ROOT_STATE_R
     root = state_root
     try:
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions -- root-owned state root must be traversable by per-user groups
-        os.chmod(root, 0o755)
+        # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions -- users may traverse to their known UID directory but cannot list this root
+        os.chmod(root, 0o711)
         directory = root_state_dir(uid, state_root=root)
         directory.mkdir(mode=0o700, exist_ok=True)
         os.chown(directory, 0, gid)
