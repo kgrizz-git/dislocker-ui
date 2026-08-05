@@ -24,6 +24,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -33,9 +34,25 @@ from enum import Enum
 from pathlib import Path
 
 from dislocker_ui.deps import DepsStatus
+from dislocker_ui.mount_policy import (
+    VOLUMES_ROOT,
+    allocate_privileged_fuse_path,
+    elevated_request_error,
+    elevated_session_error,
+    is_privileged_fuse_path,
+    is_safe_volume_label,
+    remove_empty_privileged_staging_parents,
+)
 from dislocker_ui.ntfs_mount import assert_mount_owner as _assert_mount_owner
 from dislocker_ui.ntfs_mount import mount_ntfs as _mount_ntfs
-from dislocker_ui.session import MountSession, clear_session, load_session, save_session
+from dislocker_ui.session import (
+    MountSession,
+    active_session_path_for_user,
+    clear_session,
+    legacy_session_present,
+    load_session,
+    save_session,
+)
 
 LogFn = Callable[[str], None]
 
@@ -72,7 +89,7 @@ def mount_volume(
     uid: int | None = None,
     gid: int | None = None,
     elevated: bool = False,
-    fuse_log_path: Path | None = None,
+    fuse_log_handle: object | None = None,
 ) -> MountSession:
     """
     Unlock and mount a BitLocker volume for Finder access.
@@ -85,19 +102,22 @@ def mount_volume(
     if not elevated and needs_elevation():
         # Reject an already-active session here, before prompting for admin
         # credentials — the child would reject it anyway (exit 3).
-        existing = load_session(session_path)
+        canonical_path = session_path or active_session_path_for_user()
+        existing = load_session(canonical_path)
         if existing is not None:
             raise RunnerError(
                 "A session is already active. Click Unmount before mounting again.\n"
                 f"NTFS mount: {existing.ntfs_mount}"
             )
+        # Legacy records deliberately live only in the old user-owned location.
+        if legacy_session_present():
+            raise RunnerError(_legacy_session_recovery_message())
         # Hold the per-user lock across prepare + osascript so a concurrent
         # elevation cannot sweep this transaction's request/log files.
         with elevation_transaction() as (sess_path, log_path):
             target = session_path or sess_path
             return run_elevated_mount(
                 req,
-                deps,
                 log,
                 session_path=target,
                 log_path=log_path,
@@ -111,7 +131,7 @@ def mount_volume(
         uid=uid,
         gid=gid,
         elevated=elevated,
-        fuse_log_path=fuse_log_path,
+        fuse_log_handle=fuse_log_handle,
     )
 
 
@@ -124,38 +144,20 @@ def _mount_in_process(
     uid: int | None = None,
     gid: int | None = None,
     elevated: bool = False,
-    fuse_log_path: Path | None = None,
+    fuse_log_handle: object | None = None,
 ) -> MountSession:
     """In-process mount pipeline (root / already elevated / non-Darwin)."""
     req = _canonicalize_bek_secret(req)
     volume = _validate_mount_request(req, deps, session_path=session_path)
-
-    fuse_mount = Path(tempfile.mkdtemp(prefix="dislocker-ui-"))
+    fuse_mount = _prepare_fuse_mount(req, elevated=elevated, session_path=session_path, uid=uid)
     ntfs_mount = _allocate_volume_path(req.volume_label)
     fuse_proc: subprocess.Popen[str] | None = None
-    fuse_log_handle = None
     raw_disk: str | None = None
-
     try:
         cmd = _build_dislocker_cmd(deps, req, fuse_mount)
         log("Starting dislocker-fuse…")
         log(_redact_cmd(cmd))
-        if elevated and fuse_log_path is not None:
-            # Reopen the already-validated log without following a symlink.
-            log_fd = os.open(str(fuse_log_path), os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW)
-            fuse_log_handle = os.fdopen(log_fd, "a", encoding="utf-8")
-            popen_kwargs: dict = {
-                "stdout": fuse_log_handle,
-                "stderr": subprocess.STDOUT,
-                "start_new_session": True,
-            }
-        else:
-            popen_kwargs = {
-                "stdout": subprocess.PIPE,
-                "stderr": subprocess.STDOUT,
-                "text": True,
-            }
-        fuse_proc = subprocess.Popen(cmd, **popen_kwargs)
+        fuse_proc = subprocess.Popen(cmd, **_fuse_popen_kwargs(elevated, fuse_log_handle))
 
         dislocker_file = fuse_mount / "dislocker-file"
         _wait_for_file(
@@ -163,7 +165,7 @@ def _mount_in_process(
             fuse_proc,
             log,
             timeout_s=45,
-            fuse_log_path=fuse_log_path if elevated else None,
+            diagnostic_log_path=_diagnostic_log_path(elevated, session_path),
         )
 
         log("Attaching raw NTFS image with hdiutil…")
@@ -182,7 +184,7 @@ def _mount_in_process(
             used_ntfs3g=used_ntfs3g,
             elevated=elevated,
         )
-        save_session(session, session_path)
+        save_session(session, session_path, owner_gid=gid if elevated else None)
         log(f"Mounted successfully at {ntfs_mount}")
         return session
 
@@ -198,9 +200,44 @@ def _mount_in_process(
         if fuse_proc is not None and fuse_proc.poll() is None:
             fuse_proc.terminate()
         raise
-    finally:
-        if fuse_log_handle is not None:
-            fuse_log_handle.close()
+
+
+def _prepare_fuse_mount(
+    req: MountRequest, *, elevated: bool, session_path: Path | None, uid: int | None
+) -> Path:
+    """Allocate the FUSE directory under the applicable trust boundary."""
+    if not elevated:
+        return Path(tempfile.mkdtemp(prefix="dislocker-ui-"))
+    _validate_elevated_request(req)
+    if session_path is None or uid is None:
+        raise RunnerError("privileged mount requires canonical session state")
+    try:
+        return allocate_privileged_fuse_path(session_path, uid)
+    except RuntimeError as exc:
+        raise RunnerError(str(exc)) from exc
+
+
+def _fuse_popen_kwargs(elevated: bool, fuse_log_handle: object | None) -> dict[str, object]:
+    """Return safe process-output settings for the current mount mode."""
+    if elevated and fuse_log_handle is not None:
+        # The root helper owns and has already validated this open handle.
+        return {
+            "stdout": fuse_log_handle,
+            "stderr": subprocess.STDOUT,
+            "start_new_session": True,
+        }
+    return {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
+        "text": True,
+    }
+
+
+def _diagnostic_log_path(elevated: bool, session_path: Path | None) -> Path | None:
+    """Return the canonical root diagnostic path when one is available."""
+    if elevated and session_path is not None:
+        return session_path.parent / "operation.log"
+    return None
 
 
 def unmount_volume(
@@ -217,28 +254,51 @@ def unmount_volume(
     """
     from dislocker_ui.elevate import elevation_transaction, needs_elevation, run_elevated_unmount
 
-    session = load_session(session_path)
+    canonical_path = (
+        (session_path or active_session_path_for_user()) if needs_elevation() else session_path
+    )
+    session = load_session(canonical_path)
     if session is None:
+        # Probe the old user-owned path, never the trusted canonical state path.
+        if legacy_session_present():
+            raise RunnerError(_legacy_session_recovery_message())
         raise RunnerError("No active session found to unmount")
 
     if session.elevated and needs_elevation():
-        with elevation_transaction() as (sess_path, log_path):
-            target = session_path or sess_path
-            run_elevated_unmount(deps, log, session_path=target, log_path=log_path)
+        with elevation_transaction() as (_sess_path, log_path):
+            run_elevated_unmount(log, log_path=log_path)
         return
 
+    if session.elevated:
+        error = elevated_session_error(session, session_path)
+        if error:
+            raise RunnerError(error)
     errors: list[str] = []
     errors.extend(_unmount_ntfs(deps, session, log))
     errors.extend(_detach_raw_disk(deps, session, log))
     errors.extend(_unmount_fuse(deps, session, log))
-    _remove_fuse_dir(session.fuse_mount)
-    _remove_empty_ntfs_dir(session.ntfs_mount)
-
-    clear_session(session_path)
+    if not errors:
+        errors.extend(
+            _remove_fuse_dir(
+                session.fuse_mount, elevated=session.elevated, session_path=canonical_path
+            )
+        )
+        errors.extend(_remove_empty_ntfs_dir(session.ntfs_mount))
+    if not errors:
+        clear_session(canonical_path)
     if errors:
-        log("Unmount finished with warnings:\n" + "\n".join(errors))
+        raise RunnerError("Unmount incomplete; state was retained for retry:\n" + "\n".join(errors))
     else:
         log("Unmounted successfully")
+
+
+def _legacy_session_recovery_message() -> str:
+    """Explain how to recover safely from untrusted pre-versioned state."""
+    return (
+        "A pre-0.3.0 session record was found and cannot be trusted for automated cleanup. "
+        "Unmount the existing volume manually, detach its raw disk, then remove the old "
+        "dislocker-ui session file before mounting or unmounting again."
+    )
 
 
 def _canonicalize_bek_secret(req: MountRequest) -> MountRequest:
@@ -318,7 +378,7 @@ def _unmount_ntfs(deps: DepsStatus, session: MountSession, log: LogFn) -> list[s
     log(f"Unmounting NTFS at {session.ntfs_mount}…")
     return _run_with_fallback(
         [deps.umount, session.ntfs_mount],
-        ["diskutil", "unmount", "force", session.ntfs_mount],
+        [deps.diskutil or "/usr/sbin/diskutil", "unmount", "force", session.ntfs_mount],
         log,
     )
 
@@ -343,23 +403,36 @@ def _unmount_fuse(deps: DepsStatus, session: MountSession, log: LogFn) -> list[s
         return [str(exc)]
 
 
-def _remove_fuse_dir(fuse_mount: str) -> None:
+def _remove_fuse_dir(
+    fuse_mount: str, *, elevated: bool = False, session_path: Path | None = None
+) -> list[str]:
     """Remove the temporary FUSE mount directory if present."""
     fuse_path = Path(fuse_mount)
-    if fuse_path.is_dir():
-        shutil.rmtree(fuse_path, ignore_errors=True)
+    if elevated and not is_privileged_fuse_path(fuse_path, session_path):
+        raise RunnerError("Refusing to remove a FUSE path outside privileged staging")
+    try:
+        if fuse_path.is_dir():
+            shutil.rmtree(fuse_path)
+    except OSError as exc:
+        return [f"Could not remove FUSE staging directory {fuse_path}: {exc}"]
+    if elevated:
+        remove_empty_privileged_staging_parents(fuse_path, session_path)
+    return []
 
 
-def _remove_empty_ntfs_dir(ntfs_mount: str) -> None:
+def _remove_empty_ntfs_dir(ntfs_mount: str) -> list[str]:
     """Remove an empty /Volumes mount-point directory left after unmount."""
     ntfs_path = Path(ntfs_mount)
     if not ntfs_path.is_dir():
-        return
+        return []
     try:
         if not any(ntfs_path.iterdir()):
             ntfs_path.rmdir()
-    except OSError:
-        pass
+        elif ntfs_path.exists():
+            return [f"NTFS mountpoint is not empty: {ntfs_path}"]
+    except OSError as exc:
+        return [f"Could not remove NTFS mountpoint {ntfs_path}: {exc}"]
+    return []
 
 
 def _build_dislocker_cmd(
@@ -406,7 +479,7 @@ def _wait_for_file(
     log: LogFn,
     timeout_s: float,
     *,
-    fuse_log_path: Path | None = None,
+    diagnostic_log_path: Path | None = None,
 ) -> None:
     """Wait until dislocker-file exists or the fuse process exits."""
     deadline = time.time() + timeout_s
@@ -416,14 +489,10 @@ def _wait_for_file(
             return
         if proc.poll() is not None:
             detail = ""
-            if fuse_log_path is not None and fuse_log_path.is_file():
-                try:
-                    data = fuse_log_path.read_bytes()[-8192:]
-                    detail = data.decode("utf-8", errors="replace")
-                except OSError:
-                    detail = ""
-            elif proc.stdout is not None:
+            if proc.stdout is not None:
                 detail = proc.stdout.read() or ""
+            elif diagnostic_log_path is not None:
+                detail = f"See privileged diagnostic log: {diagnostic_log_path}"
             raise RunnerError(
                 "dislocker-fuse exited before creating dislocker-file.\n" + detail.strip()
             )
@@ -461,14 +530,19 @@ def _hdiutil_attach(deps: DepsStatus, image: Path, log: LogFn) -> str:
 
 
 def _allocate_volume_path(label: str) -> Path:
-    """Choose a free /Volumes/<label> path."""
-    base = Path("/Volumes") / label
-    if not base.exists():
-        return base
+    """Create and return a new direct child of ``/Volumes`` for *label*."""
+    _validate_volume_label(label)
     for i in range(2, 50):
-        candidate = Path("/Volumes") / f"{label}-{i}"
-        if not candidate.exists():
+        suffix = "" if i == 2 else f"-{i - 1}"
+        candidate = VOLUMES_ROOT / f"{label}{suffix}"
+        try:
+            candidate.mkdir(mode=0o755)
+            info = os.lstat(candidate)
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                raise RunnerError("mountpoint creation escaped /Volumes")
             return candidate
+        except FileExistsError:
+            continue
     raise RunnerError("Could not allocate a free /Volumes mount point")
 
 
@@ -500,15 +574,26 @@ def _best_effort_cleanup(
 ) -> None:
     """Attempt to undo partial mount state after a failure."""
     if ntfs_mount.exists():
-        subprocess.run(["umount", str(ntfs_mount)], check=False, capture_output=True)
+        subprocess.run(["/sbin/umount", str(ntfs_mount)], check=False, capture_output=True)
     if raw_disk:
         subprocess.run(
-            ["hdiutil", "detach", "-force", raw_disk],
+            ["/usr/bin/hdiutil", "detach", "-force", raw_disk],
             check=False,
             capture_output=True,
         )
     if fuse_mount.exists():
-        subprocess.run(["umount", str(fuse_mount)], check=False, capture_output=True)
+        subprocess.run(["/sbin/umount", str(fuse_mount)], check=False, capture_output=True)
         shutil.rmtree(fuse_mount, ignore_errors=True)
     clear_session(session_path)
     log("Partial cleanup done")
+
+
+def _validate_volume_label(label: str) -> None:
+    if not is_safe_volume_label(label):
+        raise RunnerError("Volume label must be a short filesystem-safe display name")
+
+
+def _validate_elevated_request(req: MountRequest) -> None:
+    error = elevated_request_error(req.volume, req.readonly, req.volume_label)
+    if error:
+        raise RunnerError(error)

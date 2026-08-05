@@ -4,7 +4,7 @@ Simple macOS GUI frontend for [dislocker](https://github.com/Aorimn/dislocker).
 It does **not** fork or reimplement BitLocker crypto — it shells out to an
 installed `dislocker-fuse` and then attaches/mounts the resulting NTFS image.
 
-**Version:** see `VERSION` (currently 0.2.0).
+**Version:** see `VERSION` (currently 0.3.0).
 
 Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
@@ -19,6 +19,9 @@ On modern macOS the GUI is unprivileged; Mount/Unmount request **administrator
 privileges** (macOS password dialog) so the full pipeline can open `/dev/disk*`
 and mount under `/Volumes`. Cancel and timeout have distinct messages. Unmount
 of an elevated session asks for admin again (two prompts per cycle).
+
+Elevated GUI mounts intentionally support physical BitLocker devices
+(`/dev/diskN` or `/dev/diskNsM`) only; regular image files are out of scope.
 
 ## Requirements
 
@@ -91,6 +94,13 @@ Mount is unavailable. Uncheck Read-only when you need writes.
 Notes:
 
 - Community taps are unsupported by Homebrew.
+- The GUI's dependency check is advisory. For the elevated mount itself,
+  the complete toolchain must be trusted: macOS supplies `hdiutil`
+  (`/usr/bin/hdiutil`), `diskutil` (`/usr/sbin/diskutil`), and `umount`
+  (`/sbin/umount`); an administrator must install `dislocker-fuse` and
+  `ntfs-3g` as root-owned, non-group/world-writable executables under
+  `/usr/local/sbin` or `/opt/local/sbin`. A normal user-owned Homebrew
+  installation is deliberately not executed as root.
 - Mounts need administrator authorization (macOS dialog). Running
   `sudo ./run.sh` remains a power-user escape hatch (already-root path skips
   osascript). Elevating from a user-writable checkout is no stronger than that.
@@ -151,11 +161,10 @@ Already-root / `sudo ./run.sh` skips the osascript dialog and mounts in-process.
   (visible briefly in process listings / `ps`). Prefer a private machine and
   unmount when finished. Secrets are **not** placed in AppleScript; they travel
   briefly in a mode-0600 request file during elevation.
-- Elevation writes its mode-0600 request/log files under your
-  `Library/Application Support/dislocker-ui/` folder (a persistent, user-only
-  dir, so the privileged child can confine every path it touches). They are
-  unlinked after each operation, and any left by a killed run are swept on the
-  next Mount/Unmount.
+- Elevation writes only its mode-0600 request file under your
+  `Library/Application Support/dislocker-ui/` folder; a killed-run request is
+  swept before the next Mount/Unmount. The privileged helper derives its
+  session state and diagnostics beneath root-controlled `/var/db/dislocker-ui/`.
 - Always use **Unmount** in the app before ejecting the disk or sleeping the Mac.
 - Elevation does not harden a world-writable source tree — treat
   `sudo ./run.sh` and elevating this checkout similarly.

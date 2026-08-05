@@ -1,23 +1,8 @@
-"""
-Privileged child entry point for elevated mount/unmount.
+"""Root child for the macOS elevation flow.
 
-Overall purpose:
-  Run as root via osascript ``do shell script … with administrator privileges``.
-  Read a mode-0600 request JSON written by the unprivileged parent, validate it,
-  open the diagnostic log safely, then run the in-process runner pipeline with
-  serialized deps (never rediscover) and an explicit session_path.
-
-Inputs:
-  CLI: ``python -s -P -m dislocker_ui.privileged mount|unmount --request PATH``
-  Request JSON fields documented in plans/macos-elevation.md.
-
-Outputs:
-  Exit 0 on success; 2 validation failure; 3 RunnerError; 4 unexpected.
-  Diagnostics appended to request log_path; mount writes session_path.
-
-Requirements:
-  Must not call discover_deps() or default_session_path(). cwd should be ``/``
-  (parent forces ``cd /``). Standard library only.
+The request file is an untrusted, short-lived transport for mount intent.  It
+never selects a session path, log path, or executable.  Those root authority
+boundaries are derived locally from the authenticated UID.
 """
 
 from __future__ import annotations
@@ -29,13 +14,13 @@ import os
 import pwd
 import re
 import stat
-import sys
 import time
 import traceback
 from pathlib import Path
 from typing import Any, TextIO
 
-from dislocker_ui.deps import DepsStatus
+from dislocker_ui.deps import discover_privileged_deps
+from dislocker_ui.mount_policy import is_physical_volume, is_safe_volume_label
 from dislocker_ui.runner import (
     MountRequest,
     RunnerError,
@@ -43,13 +28,13 @@ from dislocker_ui.runner import (
     mount_volume,
     unmount_volume,
 )
+from dislocker_ui.session import ensure_root_state_dir, root_log_path, root_session_path
 
 EXIT_OK = 0
 EXIT_VALIDATION = 2
 EXIT_RUNNER = 3
 EXIT_UNEXPECTED = 4
-
-_REQUIRED_DEPS = ("dislocker_fuse", "hdiutil", "diskutil", "umount", "ntfs3g")
+_REQUEST_NAME_RE = re.compile(r"^dislocker-ui-req-\w{6,}\.json$", re.ASCII)
 
 
 class _ValidationError(ValueError):
@@ -57,69 +42,60 @@ class _ValidationError(ValueError):
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry: parse args, force cwd ``/``, dispatch mount/unmount."""
+    """Parse a request, derive trusted state, and run the requested operation."""
     parser = argparse.ArgumentParser(prog="dislocker_ui.privileged")
     parser.add_argument("action", choices=("mount", "unmount"))
     parser.add_argument("--uid", required=True, type=int)
     parser.add_argument("--request", required=True, type=Path)
     args = parser.parse_args(argv)
-
-    try:
-        os.chdir("/")
-    except OSError as exc:
-        sys.stderr.write(f"failed to chdir /: {exc}\n")
-        return EXIT_UNEXPECTED
-
     log_fp: TextIO | None = None
     try:
-        # Confine every filesystem path this root process touches under the
-        # invoking user's own Application Support dir, derived from the system
-        # passwd database via the trusted --uid arg (not request data).
-        base = _user_base(args.uid)
-        request_path = _confine_under_base(str(args.request), base, label="request")
-        payload = _load_and_unlink_request(request_path)
-        _validate_request(payload, expected_action=args.action)
-
-        uid = int(payload["uid"])
-        gid = int(payload["gid"])
-        if uid != args.uid:
-            raise _ValidationError(f"request uid {uid} != --uid {args.uid}")
-        session_path = _confine_under_base(payload["session_path"], base, label="session_path")
-        log_path = _confine_under_base(payload["log_path"], base, label="log_path")
-
-        log_fp = _open_log(log_path, owner_uid=uid)
+        os.chdir("/")
+        user_base = _user_base(args.uid)
+        request_name = _request_entry_name(args.request, user_base)
+        payload = _load_and_unlink_request(request_name, user_base, args.uid)
+        _validate_request(payload, expected_action=args.action, expected_uid=args.uid)
+        uid, gid = args.uid, _validated_gid(args.uid, int(payload["gid"]))
+        state_dir = ensure_root_state_dir(uid, gid)
+        session_path = root_session_path(uid)
+        log_fp = _open_root_log(root_log_path(uid), state_dir, gid)
         log_fp.write(
             f"audit ts={time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} "
-            f"action={payload['action']} uid={uid} "
-            f"volume={payload.get('volume', '')}\n"
+            f"action={args.action} uid={uid} volume={payload.get('volume', '')}\n"
         )
         log_fp.flush()
-        log_handle: TextIO = log_fp
 
         def log(message: str) -> None:
-            log_handle.write(message + "\n")
-            log_handle.flush()
+            if log_fp is None:
+                raise RunnerError("privileged diagnostic log is unavailable")
+            log_fp.write(message + "\n")
+            log_fp.flush()
 
-        deps = _deps_from_payload(payload["deps"])
-
+        deps = discover_privileged_deps()
+        if not deps.core_ok:
+            raise RunnerError(
+                "Trusted root-managed tools are missing: " + ", ".join(deps.missing_core())
+            )
         if args.action == "mount":
-            req = _mount_request_from_payload(payload)
             session = mount_volume(
-                req,
+                _mount_request_from_payload(payload),
                 deps,
                 log,
                 session_path=session_path,
                 uid=uid,
                 gid=gid,
                 elevated=True,
-                fuse_log_path=log_path,
+                fuse_log_handle=log_fp,
             )
             try:
-                _chown_session(session_path, uid, gid)
+                _verify_session_readable(session_path, gid)
             except RunnerError as exc:
-                # The mount succeeded; a chown failure only means the session
-                # file stays root-owned. Warn and still report success.
-                log(f"warning: {exc}")
+                log(
+                    f"Mount succeeded at {session.ntfs_mount}, but session state could not be "
+                    f"finalized: {exc}. Manually unmount {session.ntfs_mount}, detach "
+                    f"{session.raw_disk}, then have an administrator remove {session_path}."
+                )
+                raise
             log(f"privileged mount ok: {session.ntfs_mount}")
         else:
             unmount_volume(deps, log, session_path=session_path)
@@ -141,66 +117,71 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _user_base(uid: int) -> Path:
-    """
-    Return the invoking user's Application Support dir from the passwd database.
-
-    Derived from *uid* (a validated int) via the system passwd entry, so the
-    confinement base does not itself come from attacker-influenced request data.
-    """
+    """Return and validate the user's request-transport directory."""
     try:
         home = Path(pwd.getpwuid(uid).pw_dir)
     except KeyError as exc:
         raise _ValidationError(f"uid {uid} has no passwd entry") from exc
     base = home / "Library" / "Application Support" / "dislocker-ui"
     _assert_safe_base(base, uid)
-    return base.resolve()
+    return base
 
 
 def _assert_safe_base(base: Path, uid: int) -> None:
-    """Refuse a confinement base that a non-owner could have tampered with."""
+    """Require a non-symlink, user-owned, non-group-writable directory."""
     try:
         info = os.lstat(base)
     except OSError as exc:
-        raise _ValidationError(f"confinement base unavailable ({base}): {exc}") from exc
-    if stat.S_ISLNK(info.st_mode):
-        raise _ValidationError(f"confinement base must not be a symlink: {base}")
-    if not stat.S_ISDIR(info.st_mode):
-        raise _ValidationError(f"confinement base is not a directory: {base}")
-    if info.st_uid != uid:
-        raise _ValidationError(f"confinement base not owned by uid {uid}: {base}")
-    if info.st_mode & 0o022:
-        raise _ValidationError(f"confinement base is group/world-writable: {base}")
+        raise _ValidationError(f"request directory unavailable ({base}): {exc}") from exc
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise _ValidationError("request directory must be a real directory")
+    if info.st_uid != uid or info.st_mode & 0o022:
+        raise _ValidationError("request directory ownership or mode is unsafe")
 
 
-def _confine_under_base(value: str, base: Path, *, label: str) -> Path:
-    """
-    Resolve *value*, require it directly inside *base*, and rebuild it safely.
-
-    The child only ever addresses single files that live directly in the base
-    dir, so after the containment check we return ``base / basename`` — stripping
-    any directory component so the returned path cannot escape *base*.
-    """
-    resolved = Path(os.path.realpath(value))
+def _request_entry_name(path: Path, base: Path) -> str:
+    """Validate the one request entry accepted below the already-checked base."""
+    if not path.is_absolute():
+        raise _ValidationError("request path must be absolute")
     try:
-        parent = resolved.parent.relative_to(base)
+        relative = path.relative_to(base)
     except ValueError as exc:
-        raise _ValidationError(f"{label} escapes {base}: {value}") from exc
-    if parent != Path("."):
-        raise _ValidationError(f"{label} must be directly inside {base}: {value}")
-    return base / os.path.basename(resolved)
+        raise _ValidationError("request must be inside the request directory") from exc
+    if len(relative.parts) != 1 or not _REQUEST_NAME_RE.fullmatch(relative.name):
+        raise _ValidationError("request entry name is invalid")
+    return relative.name
 
 
-def _load_and_unlink_request(path: Path) -> dict[str, Any]:
-    """Read request JSON then unlink promptly (secret lives only briefly)."""
-    if path.is_symlink():
-        raise _ValidationError("request path must not be a symlink")
-    safe = Path(os.path.realpath(path))
+def _load_and_unlink_request(name: str, base: Path, owner_uid: int) -> dict[str, Any]:
+    """Read a verified request descriptor, then unlink its exact directory entry."""
+    if not _REQUEST_NAME_RE.fullmatch(name):
+        raise _ValidationError("request entry name is invalid")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
-        raw = safe.read_text(encoding="utf-8")
+        dir_fd = os.open(str(base), flags)
+    except OSError as exc:
+        raise _ValidationError(f"cannot open request directory: {exc}") from exc
+    try:
+        fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_uid != owner_uid:
+                raise _ValidationError("request must be a regular file owned by the invoking user")
+            if stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1:
+                raise _ValidationError("request must be mode 0600 with one link")
+            with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                fd = -1
+                raw = handle.read()
+        finally:
+            if fd >= 0:
+                os.close(fd)
+        # This removes a replacement directory entry without ever following it.
+        with contextlib.suppress(OSError):
+            os.unlink(name, dir_fd=dir_fd)
     except OSError as exc:
         raise _ValidationError(f"cannot read request: {exc}") from exc
-    with contextlib.suppress(OSError):
-        safe.unlink(missing_ok=True)
+    finally:
+        os.close(dir_fd)
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -210,136 +191,121 @@ def _load_and_unlink_request(path: Path) -> dict[str, Any]:
     return data
 
 
-def _validate_request(payload: dict[str, Any], *, expected_action: str) -> None:
-    """Re-validate action, absolute paths, uid/gid, and deps existence."""
-    action = payload.get("action")
-    if action != expected_action:
-        raise _ValidationError(f"action mismatch: {action!r} != {expected_action!r}")
-    _require_absolute_paths(payload, ("session_path", "log_path"))
-    _require_int_fields(payload, ("uid", "gid"))
-    _validate_deps_payload(payload.get("deps"))
-    if action == "mount":
+def _validate_request(payload: dict[str, Any], *, expected_action: str, expected_uid: int) -> None:
+    """Validate all and only untrusted intent fields before side effects."""
+    allowed = {"action", "uid", "gid"}
+    if expected_action == "mount":
+        allowed |= {"volume", "method", "secret", "readonly", "volume_label"}
+    if set(payload) != allowed or payload.get("action") != expected_action:
+        raise _ValidationError("request fields or action are invalid")
+    if type(payload.get("uid")) is not int or payload["uid"] != expected_uid:
+        raise _ValidationError("request uid does not match invoking user")
+    if type(payload.get("gid")) is not int or payload["gid"] < 0:
+        raise _ValidationError("invalid gid")
+    if expected_action == "mount":
         _validate_mount_fields(payload)
 
 
-def _require_absolute_paths(payload: dict[str, Any], keys: tuple[str, ...]) -> None:
-    """Ensure named fields are non-empty absolute path strings."""
-    for key in keys:
-        value = payload.get(key)
-        if not isinstance(value, str) or not value:
-            raise _ValidationError(f"missing {key}")
-        if not Path(value).is_absolute():
-            raise _ValidationError(f"{key} must be absolute: {value}")
-
-
-def _require_int_fields(payload: dict[str, Any], keys: tuple[str, ...]) -> None:
-    """Ensure named fields parse as integers."""
-    for key in keys:
-        if key not in payload:
-            raise _ValidationError(f"missing {key}")
-        try:
-            int(payload[key])
-        except (TypeError, ValueError) as exc:
-            raise _ValidationError(f"invalid {key}") from exc
-
-
-def _validate_deps_payload(deps: object) -> None:
-    """Ensure deps is a complete map of existing absolute files."""
-    if not isinstance(deps, dict):
-        raise _ValidationError("deps must be an object")
-    for name in _REQUIRED_DEPS:
-        path_s = deps.get(name)
-        if not isinstance(path_s, str) or not path_s:
-            raise _ValidationError(f"deps.{name} missing")
-        p = Path(path_s)
-        if not p.is_absolute() or not p.is_file():
-            raise _ValidationError(f"deps.{name} must be an existing absolute file: {path_s}")
-
-
 def _validate_mount_fields(payload: dict[str, Any]) -> None:
-    """Validate mount-only request fields including BEK absolute-path rule."""
-    for key in ("volume", "method", "secret", "readonly", "volume_label"):
-        if key not in payload:
-            raise _ValidationError(f"missing mount field {key}")
-    method = payload["method"]
-    if method not in {m.value for m in UnlockMethod}:
-        raise _ValidationError(f"invalid method: {method}")
-    if method == UnlockMethod.BEK_FILE.value:
-        secret = payload["secret"]
-        if not isinstance(secret, str) or not Path(secret).is_absolute():
-            raise _ValidationError("BEK secret must be an absolute path")
-        if "~" in secret:
-            raise _ValidationError("BEK path must not contain ~ (parent must canonicalize)")
+    volume = payload.get("volume")
+    if not is_physical_volume(volume):
+        raise _ValidationError("volume must be a physical /dev/diskN or /dev/diskNsM device")
+    if payload.get("method") not in {item.value for item in UnlockMethod}:
+        raise _ValidationError("invalid method")
+    if type(payload.get("readonly")) is not bool:
+        raise _ValidationError("readonly must be boolean")
+    label = payload.get("volume_label")
+    if not is_safe_volume_label(label):
+        raise _ValidationError("volume label is invalid")
+    secret = payload.get("secret")
+    if not isinstance(secret, str) or not secret:
+        raise _ValidationError("secret must be a non-empty string")
+    if payload["method"] == UnlockMethod.BEK_FILE.value and (
+        not Path(secret).is_absolute() or "~" in secret
+    ):
+        raise _ValidationError("BEK secret must be an absolute path without ~")
 
 
-def _deps_from_payload(deps: dict[str, Any]) -> DepsStatus:
-    """Build DepsStatus from serialized absolute paths (no discover_deps)."""
-    return DepsStatus(
-        dislocker_fuse=str(deps["dislocker_fuse"]),
-        hdiutil=str(deps["hdiutil"]),
-        diskutil=str(deps["diskutil"]),
-        umount=str(deps["umount"]),
-        ntfs3g=str(deps["ntfs3g"]),
-    )
+def _validated_gid(uid: int, gid: int) -> int:
+    """Return *gid* only when it belongs to the invoking account."""
+    try:
+        entry = pwd.getpwuid(uid)
+        allowed = set(os.getgrouplist(entry.pw_name, entry.pw_gid))
+        allowed.add(entry.pw_gid)
+    except (KeyError, OSError) as exc:
+        raise _ValidationError(f"cannot validate groups for uid {uid}") from exc
+    if gid not in allowed:
+        raise _ValidationError("request gid is not assigned to the invoking user")
+    return gid
 
 
 def _mount_request_from_payload(payload: dict[str, Any]) -> MountRequest:
-    """Construct MountRequest; BEK paths are used as-is (no expanduser)."""
     return MountRequest(
-        volume=str(payload["volume"]),
-        method=UnlockMethod(str(payload["method"])),
-        secret=str(payload["secret"]),
-        readonly=bool(payload["readonly"]),
-        volume_label=str(payload["volume_label"]),
+        volume=payload["volume"],
+        method=UnlockMethod(payload["method"]),
+        secret=payload["secret"],
+        readonly=payload["readonly"],
+        volume_label=payload["volume_label"],
     )
 
 
-def _open_log(path: Path, *, owner_uid: int) -> TextIO:
-    """
-    Open log with O_APPEND|O_NOFOLLOW; require regular file owned by request uid, mode 0600.
-    """
-    flags = os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW
+def _open_root_log(path: Path, state_dir: Path, gid: int) -> TextIO:
+    """Open the fixed root-created log; no user path is consulted."""
+    if path.parent != state_dir:
+        raise _ValidationError("root log path is outside its state directory")
+    if os.geteuid() != 0:
+        raise _ValidationError("root log must be opened by the privileged helper")
     try:
-        fd = os.open(str(path), flags)
-    except OSError as exc:
-        raise _ValidationError(f"cannot open log: {exc}") from exc
-    try:
+        fd = os.open(
+            str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o640
+        )
+        os.fchown(fd, 0, gid)
+        os.fchmod(fd, 0o640)
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode):
-            raise _ValidationError("log_path is not a regular file")
-        if info.st_uid != owner_uid:
-            raise _ValidationError("log_path owner does not match request uid")
-        if stat.S_IMODE(info.st_mode) != 0o600:
-            raise _ValidationError("log_path must be mode 0600")
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != 0
+            or stat.S_IMODE(info.st_mode) != 0o640
+        ):
+            raise _ValidationError("root log ownership or mode is unsafe")
         return os.fdopen(fd, "a", encoding="utf-8")
-    except Exception:
-        with contextlib.suppress(OSError):
-            os.close(fd)
-        raise
-
-
-def _chown_session(session_path: Path, uid: int, gid: int) -> None:
-    """chown the session file to the invoking user after a successful mount."""
-    try:
-        os.chown(session_path, uid, gid)
     except OSError as exc:
-        raise RunnerError(f"failed to chown session file: {exc}") from exc
+        raise _ValidationError(f"cannot open root log: {exc}") from exc
+
+
+def _verify_session_readable(path: Path, gid: int) -> None:
+    """Verify the atomic session write has the intended root:*gid* mode."""
+    try:
+        info = os.lstat(path)
+    except OSError as exc:
+        raise RunnerError(f"cannot finalize privileged session permissions: {exc}") from exc
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_uid != 0
+        or info.st_gid != gid
+        or stat.S_IMODE(info.st_mode) != 0o640
+    ):
+        raise RunnerError("privileged session ownership or mode is unsafe")
 
 
 def _append_log_best_effort(log_fp: TextIO | None, message: str) -> None:
-    """Write an error line if the log is already open."""
-    if log_fp is None:
-        return
-    with contextlib.suppress(OSError):
-        log_fp.write(message + "\n")
-        log_fp.flush()
+    if log_fp is not None:
+        with contextlib.suppress(OSError):
+            log_fp.write(message + "\n")
+            log_fp.flush()
 
 
 def _format_unexpected(exc: BaseException) -> str:
-    """Format traceback with password-like argv fragments redacted."""
-    tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-    composed = f"unexpected error: {exc}\n{tb}"
-    return re.sub(r"(--(?:user|recovery)-password=)\S*", r"\1***", composed)
+    """Format a traceback while redacting password-like command arguments."""
+    composed = f"unexpected error: {exc}\n" + "".join(
+        traceback.format_exception(type(exc), exc, exc.__traceback__)
+    )
+    return re.sub(
+        r"(?P<option>--(?:user|recovery)-password|--bekfile)(?P<separator>=|[ \t]+)\S+",
+        r"\g<option>\g<separator>***",
+        composed,
+    )
 
 
 if __name__ == "__main__":

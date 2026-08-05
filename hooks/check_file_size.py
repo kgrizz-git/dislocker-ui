@@ -19,7 +19,7 @@ Requirements:
 
 Thresholds (env overrides):
   POLICY_SOFT_LINE_CAP   default 600
-  POLICY_HARD_LINE_CAP   default 800
+  POLICY_HARD_LINE_CAP   default 750
   POLICY_DOC_SOFT_LINE_CAP default 1000
   POLICY_DOC_HARD_LINE_CAP default 2000
   POLICY_MAX_BYTES       default 512000 (500 KiB)
@@ -39,7 +39,7 @@ import sys
 from pathlib import Path
 
 SOFT_LINE_CAP = int(os.getenv("POLICY_SOFT_LINE_CAP", "600"))
-HARD_LINE_CAP = int(os.getenv("POLICY_HARD_LINE_CAP", "800"))
+HARD_LINE_CAP = int(os.getenv("POLICY_HARD_LINE_CAP", "750"))
 DOC_SOFT_LINE_CAP = int(os.getenv("POLICY_DOC_SOFT_LINE_CAP", "1000"))
 DOC_HARD_LINE_CAP = int(os.getenv("POLICY_DOC_HARD_LINE_CAP", "2000"))
 MAX_BYTES = int(os.getenv("POLICY_MAX_BYTES", str(500 * 1024)))

@@ -8,7 +8,15 @@ Version numbers match `VERSION` / SemVer with the public changelog.
 
 ## [Unreleased]
 
-_(none)_
+### Security
+
+- Completed a static audit of the privileged mount workflow. The timestamped,
+  gitignored report is under `tmp/`; it identifies five issues for follow-up.
+
+### Changed
+
+- Extracted privileged staging/session policy from `runner.py` and tightened
+  the source-file hard cap from 800 to 750 lines.
 
 ## [0.2.0] - 2026-07-31
 

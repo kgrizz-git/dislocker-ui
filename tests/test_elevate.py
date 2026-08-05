@@ -30,7 +30,6 @@ from dislocker_ui.elevate import (
     elevation_transaction,
     needs_elevation,
     run_elevated_mount,
-    serialize_deps,
     validate_volume_path,
 )
 from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod
@@ -102,7 +101,7 @@ def test_applescript_contains_request_path_not_secret(tmp_path: Path) -> None:
 
 
 def test_sweep_stale_elevation_files(tmp_path: Path) -> None:
-    """Stale request/log temp files are removed; unrelated files are kept."""
+    """Stale requests are removed while root-owned logs and other files are kept."""
     from dislocker_ui.elevate import _sweep_stale_elevation_files
 
     (tmp_path / "dislocker-ui-req-abc.json").write_text("{}", encoding="utf-8")
@@ -113,7 +112,7 @@ def test_sweep_stale_elevation_files(tmp_path: Path) -> None:
     lock.write_text("", encoding="utf-8")
     _sweep_stale_elevation_files(tmp_path)
     assert not (tmp_path / "dislocker-ui-req-abc.json").exists()
-    assert not (tmp_path / "dislocker-ui-log-xyz.log").exists()
+    assert (tmp_path / "dislocker-ui-log-xyz.log").exists()
     assert keep.exists()
     assert lock.exists()
 
@@ -141,7 +140,6 @@ def test_overlapping_elevation_transactions_are_serialized(
     release_holder = threading.Event()
     waiter_entered = threading.Event()
     errors: list[BaseException] = []
-    holder_log: list[Path] = []
     waiter_log: list[Path] = []
     # Observations recorded in threads; asserts stay on the main thread (S5779).
     holder_saw_release = threading.Event()
@@ -149,20 +147,19 @@ def test_overlapping_elevation_transactions_are_serialized(
 
     def holder() -> None:
         try:
-            with elevation_transaction() as (_sess, log_path):
+            with elevation_transaction():
                 # Mimic an in-flight request sitting beside the log.
                 req = support / "dislocker-ui-req-holder.json"
                 req.write_text('{"secret":"x"}', encoding="utf-8")
-                holder_log.append(log_path)
                 holder_ready.set()
                 if not release_holder.wait(timeout=5.0):
                     errors.append(TimeoutError("holder did not see release signal"))
                     return
                 holder_saw_release.set()
-                if log_path.exists() and req.exists():
+                if req.exists():
                     holder_files_ok.set()
                 else:
-                    errors.append(RuntimeError("holder request/log deleted while lock held"))
+                    errors.append(RuntimeError("holder request deleted while lock held"))
         except Exception as exc:
             errors.append(exc)
 
@@ -185,7 +182,6 @@ def test_overlapping_elevation_transactions_are_serialized(
     # Waiter must block while the holder still owns the lock.
     time.sleep(0.2)
     assert not waiter_entered.is_set()
-    assert holder_log[0].exists()
     assert (support / "dislocker-ui-req-holder.json").exists()
     release_holder.set()
     t_hold.join(timeout=5.0)
@@ -199,9 +195,6 @@ def test_overlapping_elevation_transactions_are_serialized(
     assert waiter_log
     # After the holder released, waiter's prepare may sweep the holder's temps.
     assert not (support / "dislocker-ui-req-holder.json").exists()
-    assert not holder_log[0].exists()
-    assert waiter_log[0].exists()
-    waiter_log[0].unlink(missing_ok=True)
 
 
 @pytest.mark.parametrize(
@@ -223,32 +216,15 @@ def test_classify_osascript_failure(stderr: str, exc_type: type[Exception]) -> N
     assert isinstance(err, exc_type)
 
 
-def test_validate_volume_path_accepts_disk_and_file(tmp_path: Path) -> None:
-    """/dev/disk* pattern and regular files are accepted."""
+def test_validate_volume_path_accepts_only_physical_disk() -> None:
+    """Elevated GUI mounting intentionally accepts physical disks only."""
     validate_volume_path("/dev/disk2")
     validate_volume_path("/dev/disk2s1")
-    f = tmp_path / "image.dmg"
-    f.write_bytes(b"x")
-    validate_volume_path(str(f))
+    validate_volume_path("/dev/disk2s1 ")
     with pytest.raises(RunnerError):
-        validate_volume_path("/etc/passwd/../evil")
+        validate_volume_path("/tmp/image.dmg")
     with pytest.raises(RunnerError):
         validate_volume_path("/dev/rdisk0")
-
-
-def test_serialize_deps_resolves_paths(tmp_path: Path) -> None:
-    """Deps serialization requires all paths and resolves them."""
-    # Use real existing paths from the test environment where possible.
-    python = Path("/bin/sh")
-    deps = DepsStatus(
-        dislocker_fuse=str(python),
-        hdiutil=str(python),
-        diskutil=str(python),
-        umount=str(python),
-        ntfs3g=str(python),
-    )
-    out = serialize_deps(deps)
-    assert out["ntfs3g"] == str(python.resolve())
 
 
 def test_run_elevated_mount_success_loads_session(tmp_path: Path) -> None:
@@ -286,10 +262,10 @@ def test_run_elevated_mount_success_loads_session(tmp_path: Path) -> None:
     with patch("dislocker_ui.elevate.subprocess.run", side_effect=fake_run):
         result = run_elevated_mount(
             req,
-            _deps(),
             logs.append,
             session_path=session_path,
             log_path=log_path,
+            request_dir=tmp_path,
         )
     assert result.ntfs_mount == "/Volumes/X"
     assert any("administrator" in line.lower() for line in logs)
@@ -325,24 +301,23 @@ def test_run_elevated_mount_cancel_unlinks_request(tmp_path: Path) -> None:
     with (
         patch("dislocker_ui.elevate.tempfile.mkstemp", side_effect=tracking_mkstemp),
         patch("dislocker_ui.elevate.subprocess.run", side_effect=fake_run),
+        pytest.raises(ElevationCancelled),
     ):
-        deps = _deps()
-        with pytest.raises(ElevationCancelled):
-            run_elevated_mount(
-                req,
-                deps,
-                lambda _m: None,
-                session_path=session_path,
-                log_path=log_path,
-            )
+        run_elevated_mount(
+            req,
+            lambda _m: None,
+            session_path=session_path,
+            log_path=log_path,
+            request_dir=tmp_path,
+        )
     assert created
     assert not created[0].exists()
 
 
-def test_prepare_elevation_paths_creates_0600_log(
+def test_prepare_elevation_paths_returns_root_derived_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """prepare_elevation_paths returns session path and a mode-0600 log file."""
+    """The unprivileged parent does not create root session or log files."""
     from dislocker_ui.elevate import prepare_elevation_paths
 
     support = tmp_path / "Application Support" / "dislocker-ui"
@@ -351,6 +326,15 @@ def test_prepare_elevation_paths_creates_0600_log(
         "dislocker_ui.session.default_session_path",
         lambda: support / "active_session.json",
     )
+    state = tmp_path / "root-state"
+    monkeypatch.setattr(
+        "dislocker_ui.elevate.root_session_path",
+        lambda uid: state / str(uid) / "active_session.json",
+    )
+    monkeypatch.setattr(
+        "dislocker_ui.elevate.root_log_path",
+        lambda uid: state / str(uid) / "operation.log",
+    )
 
     def _safe(path: Path, *, label: str) -> None:
         return None
@@ -358,9 +342,8 @@ def test_prepare_elevation_paths_creates_0600_log(
     with patch("dislocker_ui.elevate.assert_safe_path_for_elevation", side_effect=_safe):
         session_path, log_path = prepare_elevation_paths()
     assert session_path.name == "active_session.json"
-    assert log_path.is_file()
-    assert oct(log_path.stat().st_mode & 0o777) == "0o600"
-    log_path.unlink(missing_ok=True)
+    assert log_path.name == "operation.log"
+    assert not log_path.exists()
 
 
 def test_assert_safe_path_rejects_world_writable(tmp_path: Path) -> None:
@@ -386,10 +369,8 @@ def test_request_json_secret_is_last_key(tmp_path: Path) -> None:
     )
     path = _write_request(
         action="mount",
-        deps=_deps(),
-        session_path=tmp_path / "s.json",
-        log_path=tmp_path / "l.log",
         req=req,
+        request_dir=tmp_path,
     )
     try:
         text = path.read_text(encoding="utf-8")

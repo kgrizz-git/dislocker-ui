@@ -40,9 +40,9 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from dislocker_ui import session as session_mod
-from dislocker_ui.deps import DepsStatus
+from dislocker_ui.mount_policy import is_physical_volume
 from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod
-from dislocker_ui.session import MountSession, load_session
+from dislocker_ui.session import MountSession, load_session, root_log_path, root_session_path
 
 LogFn = Callable[[str], None]
 
@@ -52,7 +52,6 @@ _ADMIN_PROMPT = (
 )
 _TIMEOUT_SECONDS = 600
 _LOG_TAIL_BYTES = 8 * 1024
-_VOLUME_RE = re.compile(r"^/dev/disk\d+(s\d+)?$")
 _ERROR_NUMBER_RE = re.compile(r"\((-?\d+)\)\s*$|number\s+(-?\d+)", re.IGNORECASE)
 _EXIT_REASONS = {2: "request validation", 3: "mount/unmount", 4: "unexpected"}
 _TIMED_OUT_MSG = (
@@ -79,11 +78,11 @@ def needs_elevation() -> bool:
 
 def run_elevated_mount(
     req: MountRequest,
-    deps: DepsStatus,
     log: LogFn,
     *,
     session_path: Path,
     log_path: Path,
+    request_dir: Path | None = None,
 ) -> MountSession:
     """
     Write a mount request and run the privileged child via osascript.
@@ -94,10 +93,8 @@ def run_elevated_mount(
     validate_volume_path(req.volume)
     request_path = _write_request(
         action="mount",
-        deps=deps,
-        session_path=session_path,
-        log_path=log_path,
         req=req,
+        request_dir=request_dir or _request_directory(),
     )
     try:
         _run_osascript(request_path, action="mount", log=log, log_path=log_path)
@@ -110,15 +107,13 @@ def run_elevated_mount(
         return session
     finally:
         _unlink_quiet(request_path)
-        _unlink_quiet(log_path)
 
 
 def run_elevated_unmount(
-    deps: DepsStatus,
     log: LogFn,
     *,
-    session_path: Path,
     log_path: Path,
+    request_dir: Path | None = None,
 ) -> None:
     """
     Write an unmount request and run the privileged child via osascript.
@@ -127,16 +122,13 @@ def run_elevated_unmount(
     """
     request_path = _write_request(
         action="unmount",
-        deps=deps,
-        session_path=session_path,
-        log_path=log_path,
         req=None,
+        request_dir=request_dir or _request_directory(),
     )
     try:
         _run_osascript(request_path, action="unmount", log=log, log_path=log_path)
     finally:
         _unlink_quiet(request_path)
-        _unlink_quiet(log_path)
 
 
 @contextlib.contextmanager
@@ -149,22 +141,23 @@ def elevation_transaction() -> Iterator[tuple[Path, Path]]:
     for the full elevated operation). Prevents a concurrent prepare from deleting
     another transaction's request or log file while an auth dialog is pending.
     """
-    session_path = session_mod.default_session_path()
-    with _elevation_lock(session_path.parent):
+    request_dir = _request_directory()
+    with _elevation_lock(request_dir):
         yield prepare_elevation_paths()
 
 
 def prepare_elevation_paths() -> tuple[Path, Path]:
     """
-    Prepare user-owned session directory and an ephemeral 0600 log file.
+    Prepare the user-owned request directory and report canonical root paths.
 
-    Returns (session_path, log_path). Does not create a placeholder session file.
+    Returns (session_path, log_path). The root child creates both files in its
+    root-owned state directory.
 
     Callers that run osascript afterward must use :func:`elevation_transaction`
     so the stale-file sweep cannot race another elevation.
     """
-    session_path = session_mod.default_session_path()
-    assert_safe_path_for_elevation(session_path.parent, label="Application Support")
+    request_dir = _request_directory()
+    assert_safe_path_for_elevation(request_dir, label="Application Support")
     package_dir = Path(__file__).resolve().parent
     src_root = package_dir.parent
     # Root executes these modules via PYTHONPATH; guard both the package dir it
@@ -174,18 +167,17 @@ def prepare_elevation_paths() -> tuple[Path, Path]:
     # These temp files live in the persistent Application Support dir (not a
     # reboot-cleared temp dir) so the child can confine them; sweep any left
     # behind by a killed run first — a stale request file can hold a secret.
-    _sweep_stale_elevation_files(session_path.parent)
-    # Keep the log beside the session file in the validated, user-owned
-    # Application Support dir so the privileged child can confine every path it
-    # touches under one trusted base (not a world-shared temp dir).
-    fd, name = tempfile.mkstemp(
-        prefix="dislocker-ui-log-", suffix=".log", dir=str(session_path.parent)
-    )
-    try:
-        os.fchmod(fd, 0o600)
-    finally:
-        os.close(fd)
-    return session_path, Path(name)
+    _sweep_stale_elevation_files(request_dir)
+    # The root child creates both of these inside its root-owned state dir.
+    # They are returned only so the parent knows where to read status/errors.
+    return root_session_path(os.getuid()), root_log_path(os.getuid())
+
+
+def _request_directory() -> Path:
+    """Return the user-owned transport directory, creating it before elevation."""
+    directory = session_mod.default_session_path().parent
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return directory
 
 
 @contextlib.contextmanager
@@ -211,8 +203,8 @@ def _elevation_lock(directory: Path) -> Iterator[None]:
 
 
 def _sweep_stale_elevation_files(directory: Path) -> None:
-    """Best-effort removal of request/log temp files left by a prior run."""
-    for pattern in ("dislocker-ui-req-*.json", "dislocker-ui-log-*.log"):
+    """Best-effort removal of stale request files left by a prior run."""
+    for pattern in ("dislocker-ui-req-*.json",):
         for stale in directory.glob(pattern):
             _unlink_quiet(stale)
 
@@ -229,33 +221,12 @@ def assert_safe_path_for_elevation(path: Path, *, label: str) -> None:
 
 
 def validate_volume_path(volume: str) -> None:
-    """Refuse elevation unless volume looks like /dev/disk* or an existing file."""
-    stripped = volume.strip()
-    if _VOLUME_RE.match(stripped):
-        return
-    path = Path(stripped)
-    if path.is_file() and not path.is_symlink():
+    """Refuse elevation unless *volume* is a physical macOS disk selector."""
+    if is_physical_volume(volume.strip()):
         return
     raise RunnerError(
-        f"Refusing to elevate for volume path (must be /dev/diskNsM or a regular file): {volume}"
+        f"Refusing to elevate for volume path (must be /dev/diskN or /dev/diskNsM): {volume}"
     )
-
-
-def serialize_deps(deps: DepsStatus) -> dict[str, str]:
-    """Serialize DepsStatus absolute paths for the privileged child (no rediscovery)."""
-    mapping = {
-        "dislocker_fuse": deps.dislocker_fuse,
-        "hdiutil": deps.hdiutil,
-        "diskutil": deps.diskutil,
-        "umount": deps.umount,
-        "ntfs3g": deps.ntfs3g,
-    }
-    out: dict[str, str] = {}
-    for key, value in mapping.items():
-        if not value:
-            raise RunnerError(f"Cannot elevate: missing dependency path for {key}")
-        out[key] = str(Path(value).resolve())
-    return out
 
 
 def build_osascript(shell_command: str, *, prompt: str = _ADMIN_PROMPT) -> str:
@@ -353,25 +324,18 @@ def _parse_error_number(text: str) -> int | None:
 def _write_request(
     *,
     action: str,
-    deps: DepsStatus,
-    session_path: Path,
-    log_path: Path,
     req: MountRequest | None,
+    request_dir: Path,
 ) -> Path:
     """Create a mode-0600 request JSON; secret is inserted last when present."""
-    fd, name = tempfile.mkstemp(
-        prefix="dislocker-ui-req-", suffix=".json", dir=str(session_path.parent)
-    )
+    fd, name = tempfile.mkstemp(prefix="dislocker-ui-req-", suffix=".json", dir=str(request_dir))
     path = Path(name)
     try:
         os.fchmod(fd, 0o600)
         payload: dict[str, object] = {
             "action": action,
-            "session_path": str(session_path),
-            "log_path": str(log_path),
             "uid": os.getuid(),
             "gid": os.getgid(),
-            "deps": serialize_deps(deps),
         }
         if action == "mount":
             if req is None:

@@ -19,11 +19,19 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dislocker_ui.deps import DepsStatus
+from dislocker_ui.mount_policy import (
+    allocate_privileged_fuse_path,
+    remove_empty_privileged_staging_parents,
+)
 from dislocker_ui.runner import (
     MountRequest,
     RunnerError,
     UnlockMethod,
     _canonicalize_bek_secret,
+    _diagnostic_log_path,
+    _fuse_popen_kwargs,
+    _prepare_fuse_mount,
+    _wait_for_file,
     mount_volume,
     unmount_volume,
 )
@@ -48,6 +56,10 @@ def _deps() -> DepsStatus:
         umount="/bin/umount",
         ntfs3g="/bin/ntfs-3g",
     )
+
+
+def _log(_message: str) -> None:
+    """Discard log output in runner facade tests."""
 
 
 def test_mount_dispatches_to_elevate_when_needed() -> None:
@@ -106,6 +118,94 @@ def test_mount_rejects_active_session_before_elevating() -> None:
     txn.assert_not_called()
 
 
+def test_mount_rejects_legacy_session_before_elevating() -> None:
+    """A pre-versioned session cannot be overwritten by a new elevated mount."""
+    req = MountRequest(
+        volume="/dev/disk2s1",
+        method=UnlockMethod.USER_PASSWORD,
+        secret="x",
+        readonly=True,
+    )
+    deps = _deps()
+    with (
+        patch("dislocker_ui.elevate.needs_elevation", return_value=True),
+        patch("dislocker_ui.runner.load_session", return_value=None),
+        patch("dislocker_ui.runner.legacy_session_present", return_value=True),
+        patch("dislocker_ui.elevate.run_elevated_mount") as elev,
+        pytest.raises(RunnerError, match=r"pre-0\.3\.0"),
+    ):
+        mount_volume(req, deps, _log)
+    elev.assert_not_called()
+
+
+def test_unmount_rejects_legacy_session_with_recovery_guidance() -> None:
+    """An unversioned session record is not treated as absent mount state."""
+    deps = _deps()
+    with (
+        patch("dislocker_ui.elevate.needs_elevation", return_value=False),
+        patch("dislocker_ui.runner.load_session", return_value=None),
+        patch("dislocker_ui.runner.legacy_session_present", return_value=True),
+        pytest.raises(RunnerError, match=r"pre-0\.3\.0"),
+    ):
+        unmount_volume(deps, _log)
+
+
+def test_unmount_uses_canonical_path_for_all_cleanup_state() -> None:
+    """A Darwin unmount cleans the same canonical state file it loaded."""
+    canonical = Path("/var/db/dislocker-ui/501/active_session.json")
+    session = MountSession(
+        volume="/dev/disk2s1",
+        fuse_mount="/tmp/fuse",
+        dislocker_file="/tmp/fuse/dislocker-file",
+        raw_disk="/dev/disk9",
+        ntfs_mount="/Volumes/X",
+        readonly=True,
+        used_ntfs3g=True,
+    )
+    with (
+        patch("dislocker_ui.elevate.needs_elevation", return_value=True),
+        patch("dislocker_ui.runner.active_session_path_for_user", return_value=canonical),
+        patch("dislocker_ui.runner.load_session", return_value=session),
+        patch("dislocker_ui.runner._unmount_ntfs", return_value=[]),
+        patch("dislocker_ui.runner._detach_raw_disk", return_value=[]),
+        patch("dislocker_ui.runner._unmount_fuse", return_value=[]),
+        patch("dislocker_ui.runner._remove_fuse_dir", return_value=[]) as remove_fuse,
+        patch("dislocker_ui.runner._remove_empty_ntfs_dir", return_value=[]),
+        patch("dislocker_ui.runner.clear_session") as clear,
+    ):
+        unmount_volume(_deps(), lambda _m: None)
+    assert remove_fuse.call_args.kwargs["session_path"] == canonical
+    clear.assert_called_once_with(canonical)
+
+
+def test_elevated_fuse_failure_names_the_diagnostic_log() -> None:
+    """Elevated FUSE failures preserve a useful diagnostic location."""
+    proc = MagicMock()
+    proc.poll.return_value = 1
+    proc.stdout = None
+    with pytest.raises(RunnerError, match=r"operation\.log"):
+        _wait_for_file(
+            Path("/tmp/missing-dislocker-file"),
+            proc,
+            lambda _m: None,
+            timeout_s=1,
+            diagnostic_log_path=Path("/var/db/dislocker-ui/501/operation.log"),
+        )
+
+
+def test_privileged_staging_is_private_and_empty_parents_are_removed(tmp_path: Path) -> None:
+    """Privileged staging is mode 0700 and leaves no empty per-user parents."""
+    session_path = tmp_path / "501" / "active_session.json"
+    staging = tmp_path / "staging" / "501"
+    staging.mkdir(parents=True, mode=0o755)
+    fuse_path = allocate_privileged_fuse_path(session_path, 501)
+    assert fuse_path.parent.stat().st_mode & 0o777 == 0o700
+    fuse_path.rmdir()
+    remove_empty_privileged_staging_parents(fuse_path, session_path)
+    assert not staging.exists()
+    assert not staging.parent.exists()
+
+
 def test_mount_in_process_when_already_root() -> None:
     """When needs_elevation is false, in-process path runs."""
     req = MountRequest(
@@ -124,6 +224,51 @@ def test_mount_in_process_when_already_root() -> None:
     assert result is session
     inproc.assert_called_once()
     elev.assert_not_called()
+
+
+def test_elevated_fuse_setup_uses_canonical_staging_path() -> None:
+    """The elevated pipeline delegates FUSE staging to the shared policy."""
+    req = MountRequest(
+        volume="/dev/disk2s1",
+        method=UnlockMethod.USER_PASSWORD,
+        secret="x",
+        readonly=True,
+    )
+    session_path = Path("/var/db/dislocker-ui/501/active_session.json")
+    fuse_path = Path("/var/db/dislocker-ui/staging/501/session-test")
+    with patch(
+        "dislocker_ui.runner.allocate_privileged_fuse_path", return_value=fuse_path
+    ) as allocate:
+        assert (
+            _prepare_fuse_mount(req, elevated=True, session_path=session_path, uid=501) == fuse_path
+        )
+    allocate.assert_called_once_with(session_path, 501)
+
+
+def test_elevated_fuse_setup_requires_canonical_state() -> None:
+    """The root path never falls back to a regular temporary directory."""
+    req = MountRequest(
+        volume="/dev/disk2s1",
+        method=UnlockMethod.USER_PASSWORD,
+        secret="x",
+        readonly=True,
+    )
+    with pytest.raises(RunnerError, match="canonical session state"):
+        _prepare_fuse_mount(req, elevated=True, session_path=None, uid=501)
+
+
+def test_fuse_popen_output_and_diagnostic_paths_follow_elevation_mode() -> None:
+    """Elevated FUSE output uses the validated root log, never a user pipe."""
+    handle = MagicMock()
+    elevated = _fuse_popen_kwargs(True, handle)
+    standard = _fuse_popen_kwargs(False, handle)
+    session_path = Path("/var/db/dislocker-ui/501/active_session.json")
+    assert elevated["stdout"] is handle
+    assert elevated["start_new_session"] is True
+    assert standard["stdout"] is not handle
+    assert standard["text"] is True
+    assert _diagnostic_log_path(True, session_path) == session_path.parent / "operation.log"
+    assert _diagnostic_log_path(False, session_path) is None
 
 
 def test_unmount_reelevates_when_session_elevated() -> None:

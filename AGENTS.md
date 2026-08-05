@@ -96,7 +96,7 @@ Prefer `$HOME`, `Path.home()`, or repo-relative paths.
 Suppress a single line with `absolute-path-allow`, or list a file in
 `.absolute-paths-allowlist`.
 
-Source files soft-cap at **600** lines and hard-cap at **800**
+Source files soft-cap at **600** lines and hard-cap at **750**
 (`hooks/check_file_size.py`). Cyclomatic complexity soft-gated by Ruff `C901`
 (max 12). Coverage fail-under is **80%** (omit `runner` / `__main__`; GUI covered).
 CI runs GUI tests under Xvfb (`xvfb-run`) on Linux.

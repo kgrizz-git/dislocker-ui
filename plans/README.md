@@ -27,4 +27,5 @@ Tracked implementation plans for **dislocker-ui**.
 
 ## Active plans
 
-_(none)_
+- [Privileged helper hardening](2026-08-05-privileged-helper-hardening.md):
+  remediate the elevated mount/unmount security findings.
