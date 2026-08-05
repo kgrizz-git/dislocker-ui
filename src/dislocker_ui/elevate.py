@@ -41,6 +41,7 @@ from pathlib import Path
 
 from dislocker_ui import session as session_mod
 from dislocker_ui.deps import DepsStatus
+from dislocker_ui.mount_policy import is_physical_volume
 from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod
 from dislocker_ui.session import MountSession, load_session, root_log_path, root_session_path
 
@@ -52,7 +53,6 @@ _ADMIN_PROMPT = (
 )
 _TIMEOUT_SECONDS = 600
 _LOG_TAIL_BYTES = 8 * 1024
-_VOLUME_RE = re.compile(r"^/dev/disk\d+(s\d+)?$")
 _ERROR_NUMBER_RE = re.compile(r"\((-?\d+)\)\s*$|number\s+(-?\d+)", re.IGNORECASE)
 _EXIT_REASONS = {2: "request validation", 3: "mount/unmount", 4: "unexpected"}
 _TIMED_OUT_MSG = (
@@ -79,11 +79,11 @@ def needs_elevation() -> bool:
 
 def run_elevated_mount(
     req: MountRequest,
-    deps: DepsStatus,
     log: LogFn,
     *,
     session_path: Path,
     log_path: Path,
+    request_dir: Path | None = None,
 ) -> MountSession:
     """
     Write a mount request and run the privileged child via osascript.
@@ -94,8 +94,8 @@ def run_elevated_mount(
     validate_volume_path(req.volume)
     request_path = _write_request(
         action="mount",
-        session_path=session_path,
         req=req,
+        request_dir=request_dir or _request_directory(),
     )
     try:
         _run_osascript(request_path, action="mount", log=log, log_path=log_path)
@@ -111,11 +111,11 @@ def run_elevated_mount(
 
 
 def run_elevated_unmount(
-    deps: DepsStatus,
     log: LogFn,
     *,
     session_path: Path,
     log_path: Path,
+    request_dir: Path | None = None,
 ) -> None:
     """
     Write an unmount request and run the privileged child via osascript.
@@ -124,8 +124,8 @@ def run_elevated_unmount(
     """
     request_path = _write_request(
         action="unmount",
-        session_path=session_path,
         req=None,
+        request_dir=request_dir or _request_directory(),
     )
     try:
         _run_osascript(request_path, action="unmount", log=log, log_path=log_path)
@@ -150,9 +150,10 @@ def elevation_transaction() -> Iterator[tuple[Path, Path]]:
 
 def prepare_elevation_paths() -> tuple[Path, Path]:
     """
-    Prepare user-owned session directory and an ephemeral 0600 log file.
+    Prepare the user-owned request directory and report canonical root paths.
 
-    Returns (session_path, log_path). Does not create a placeholder session file.
+    Returns (session_path, log_path). The root child creates both files in its
+    root-owned state directory.
 
     Callers that run osascript afterward must use :func:`elevation_transaction`
     so the stale-file sweep cannot race another elevation.
@@ -223,10 +224,11 @@ def assert_safe_path_for_elevation(path: Path, *, label: str) -> None:
 
 def validate_volume_path(volume: str) -> None:
     """Refuse elevation unless *volume* is a physical macOS disk selector."""
-    stripped = volume.strip()
-    if _VOLUME_RE.match(stripped):
+    if is_physical_volume(volume.strip()):
         return
-    raise RunnerError(f"Refusing to elevate for volume path (must be /dev/diskNsM): {volume}")
+    raise RunnerError(
+        f"Refusing to elevate for volume path (must be /dev/diskN or /dev/diskNsM): {volume}"
+    )
 
 
 def serialize_deps(deps: DepsStatus) -> dict[str, str]:
@@ -330,17 +332,10 @@ def _parse_error_number(text: str) -> int | None:
 def _write_request(
     *,
     action: str,
-    session_path: Path,
     req: MountRequest | None,
+    request_dir: Path,
 ) -> Path:
     """Create a mode-0600 request JSON; secret is inserted last when present."""
-    # Tests may pass a private temporary session path.  Production paths are
-    # below /var/db and must use the user-owned transport directory instead.
-    request_dir = (
-        _request_directory()
-        if session_path == root_session_path(os.getuid())
-        else session_path.parent
-    )
     fd, name = tempfile.mkstemp(prefix="dislocker-ui-req-", suffix=".json", dir=str(request_dir))
     path = Path(name)
     try:

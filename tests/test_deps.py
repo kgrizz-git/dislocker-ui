@@ -11,7 +11,9 @@ Requirements:
 
 from __future__ import annotations
 
+import stat
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -104,3 +106,18 @@ def test_discover_deps_homebrew_ntfs_fallback(monkeypatch: pytest.MonkeyPatch) -
     assert status.ntfs3g == "/opt/homebrew/bin/ntfs-3g"
     assert status.can_write is True
     assert status.core_ok is True
+
+
+def test_privileged_dependency_rejects_writable_executable() -> None:
+    """A fixed root path is unsafe when its executable file is writable."""
+    from dislocker_ui.deps import _is_trusted_executable
+
+    candidate = Path("/opt/local/sbin/dislocker-fuse")
+
+    def fake_stat(path: str | Path, **_kwargs):
+        if Path(path) == candidate:
+            return SimpleNamespace(st_mode=stat.S_IFREG | 0o775, st_uid=0)
+        return SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=0)
+
+    with patch("dislocker_ui.deps.os.stat", side_effect=fake_stat):
+        assert _is_trusted_executable(candidate) is False

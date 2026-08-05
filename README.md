@@ -95,9 +95,12 @@ Notes:
 
 - Community taps are unsupported by Homebrew.
 - The GUI's dependency check is advisory. For the elevated mount itself,
-  `dislocker-fuse` and `ntfs-3g` must be root-owned, non-group/world-writable
-  executables installed under `/usr/local/sbin` or `/opt/local/sbin`. A normal
-  user-owned Homebrew installation is deliberately not executed as root.
+  the complete toolchain must be trusted: macOS supplies `hdiutil`
+  (`/usr/bin/hdiutil`), `diskutil` (`/usr/sbin/diskutil`), and `umount`
+  (`/sbin/umount`); an administrator must install `dislocker-fuse` and
+  `ntfs-3g` as root-owned, non-group/world-writable executables under
+  `/usr/local/sbin` or `/opt/local/sbin`. A normal user-owned Homebrew
+  installation is deliberately not executed as root.
 - Mounts need administrator authorization (macOS dialog). Running
   `sudo ./run.sh` remains a power-user escape hatch (already-root path skips
   osascript). Elevating from a user-writable checkout is no stronger than that.

@@ -151,6 +151,19 @@ def load_session(path: Path | None = None) -> MountSession | None:
         return None
 
 
+def legacy_session_present(path: Path | None = None) -> bool:
+    """True when a regular session file appears to predate schema versioning."""
+    target = path or default_session_path()
+    try:
+        info = os.lstat(target)
+        if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            return False
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(raw, dict) and "version" not in raw and "ntfs_mount" in raw
+
+
 def clear_session(path: Path | None = None) -> None:
     """Delete the fixed session file if it exists."""
     target = path or default_session_path()

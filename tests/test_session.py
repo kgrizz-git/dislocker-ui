@@ -17,6 +17,7 @@ from pathlib import Path
 from dislocker_ui.session import (
     MountSession,
     clear_session,
+    legacy_session_present,
     load_session,
     root_log_path,
     root_session_path,
@@ -65,6 +66,14 @@ def test_load_incomplete_object_returns_none(tmp_path: Path) -> None:
     path = tmp_path / "partial.json"
     path.write_text(json.dumps({"volume": "/dev/disk1"}), encoding="utf-8")
     assert load_session(path) is None
+
+
+def test_legacy_session_probe_identifies_unversioned_session(tmp_path: Path) -> None:
+    """Pre-0.3.0 state is identified for manual recovery, never loaded."""
+    path = tmp_path / "active_session.json"
+    path.write_text(json.dumps({"ntfs_mount": "/Volumes/Old"}), encoding="utf-8")
+    assert load_session(path) is None
+    assert legacy_session_present(path) is True
 
 
 def test_clear_session_removes_file(tmp_path: Path) -> None:

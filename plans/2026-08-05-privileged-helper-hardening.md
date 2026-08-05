@@ -80,6 +80,23 @@ pre-hardening sessions before upgrading. If a legacy session is present after
 upgrade, show a clear manual-recovery message rather than passing its paths to
 root cleanup.
 
+## Review follow-up
+
+The post-implementation review adds these enforcement details to the same
+design, rather than creating a parallel protocol:
+
+- Keep the request-name allowlist synchronized with `tempfile.mkstemp()`'s
+  generated alphabet, including underscores.
+- Verify a request-supplied group ID belongs to the invoking account before it
+  reaches any root-owned state, log, or mount ownership operation.
+- Reject a writable executable file itself as well as writable ancestor
+  directories in the privileged dependency policy.
+- Use one shared physical-device/label policy in the parent, root child, and
+  cleanup validation; preserve the parent-side whitespace normalization only
+  before it serializes the request.
+- Preserve manual recovery guidance for legacy state, finalization failures,
+  and FUSE failures whose output is routed to the privileged diagnostic log.
+
 ## Ordered work packages
 
 ### 1. Establish canonical state and session schema

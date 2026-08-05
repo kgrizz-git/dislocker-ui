@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from dislocker_ui.deps import discover_privileged_deps
+from dislocker_ui.mount_policy import is_physical_volume, is_safe_volume_label
 from dislocker_ui.runner import (
     MountRequest,
     RunnerError,
@@ -33,9 +34,7 @@ EXIT_OK = 0
 EXIT_VALIDATION = 2
 EXIT_RUNNER = 3
 EXIT_UNEXPECTED = 4
-_VOLUME_RE = re.compile(r"^/dev/disk\d+(s\d+)?$")
-_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$")
-_REQUEST_NAME_RE = re.compile(r"^dislocker-ui-req-[A-Za-z0-9]{6,}\.json$")
+_REQUEST_NAME_RE = re.compile(r"^dislocker-ui-req-[A-Za-z0-9_]{6,}\.json$")
 
 
 class _ValidationError(ValueError):
@@ -56,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
         request_name = _request_entry_name(args.request, user_base)
         payload = _load_and_unlink_request(request_name, user_base, args.uid)
         _validate_request(payload, expected_action=args.action, expected_uid=args.uid)
-        uid, gid = args.uid, int(payload["gid"])
+        uid, gid = args.uid, _validated_gid(args.uid, int(payload["gid"]))
         state_dir = ensure_root_state_dir(uid, gid)
         session_path = root_session_path(uid)
         log_fp = _open_root_log(root_log_path(uid), state_dir, gid)
@@ -88,7 +87,15 @@ def main(argv: list[str] | None = None) -> int:
                 elevated=True,
                 fuse_log_handle=log_fp,
             )
-            _make_session_readable(session_path, gid)
+            try:
+                _make_session_readable(session_path, gid)
+            except RunnerError as exc:
+                log(
+                    f"Mount succeeded at {session.ntfs_mount}, but session state could not be "
+                    f"finalized: {exc}. Manually unmount {session.ntfs_mount}, detach "
+                    f"{session.raw_disk}, then have an administrator remove {session_path}."
+                )
+                raise
             log(f"privileged mount ok: {session.ntfs_mount}")
         else:
             unmount_volume(deps, log, session_path=session_path)
@@ -201,14 +208,14 @@ def _validate_request(payload: dict[str, Any], *, expected_action: str, expected
 
 def _validate_mount_fields(payload: dict[str, Any]) -> None:
     volume = payload.get("volume")
-    if not isinstance(volume, str) or not _VOLUME_RE.fullmatch(volume):
+    if not is_physical_volume(volume):
         raise _ValidationError("volume must be a physical /dev/diskN or /dev/diskNsM device")
     if payload.get("method") not in {item.value for item in UnlockMethod}:
         raise _ValidationError("invalid method")
     if type(payload.get("readonly")) is not bool:
         raise _ValidationError("readonly must be boolean")
     label = payload.get("volume_label")
-    if not isinstance(label, str) or not _LABEL_RE.fullmatch(label) or label in {".", ".."}:
+    if not is_safe_volume_label(label):
         raise _ValidationError("volume label is invalid")
     secret = payload.get("secret")
     if not isinstance(secret, str) or not secret:
@@ -217,6 +224,19 @@ def _validate_mount_fields(payload: dict[str, Any]) -> None:
         not Path(secret).is_absolute() or "~" in secret
     ):
         raise _ValidationError("BEK secret must be an absolute path without ~")
+
+
+def _validated_gid(uid: int, gid: int) -> int:
+    """Return *gid* only when it belongs to the invoking account."""
+    try:
+        entry = pwd.getpwuid(uid)
+        allowed = set(os.getgrouplist(entry.pw_name, entry.pw_gid))
+        allowed.add(entry.pw_gid)
+    except (KeyError, OSError) as exc:
+        raise _ValidationError(f"cannot validate groups for uid {uid}") from exc
+    if gid not in allowed:
+        raise _ValidationError("request gid is not assigned to the invoking user")
+    return gid
 
 
 def _mount_request_from_payload(payload: dict[str, Any]) -> MountRequest:

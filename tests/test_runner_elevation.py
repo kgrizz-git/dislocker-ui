@@ -24,6 +24,7 @@ from dislocker_ui.runner import (
     RunnerError,
     UnlockMethod,
     _canonicalize_bek_secret,
+    _wait_for_file,
     mount_volume,
     unmount_volume,
 )
@@ -104,6 +105,79 @@ def test_mount_rejects_active_session_before_elevating() -> None:
             mount_volume(req, deps, lambda _m: None)
     elev.assert_not_called()
     txn.assert_not_called()
+
+
+def test_mount_rejects_legacy_session_before_elevating() -> None:
+    """A pre-versioned session cannot be overwritten by a new elevated mount."""
+    req = MountRequest(
+        volume="/dev/disk2s1",
+        method=UnlockMethod.USER_PASSWORD,
+        secret="x",
+        readonly=True,
+    )
+    with (
+        patch("dislocker_ui.elevate.needs_elevation", return_value=True),
+        patch("dislocker_ui.runner.load_session", return_value=None),
+        patch("dislocker_ui.runner.legacy_session_present", return_value=True),
+        patch("dislocker_ui.elevate.run_elevated_mount") as elev,
+        pytest.raises(RunnerError, match=r"pre-0\.3\.0"),
+    ):
+        mount_volume(req, _deps(), lambda _m: None)
+    elev.assert_not_called()
+
+
+def test_unmount_rejects_legacy_session_with_recovery_guidance() -> None:
+    """An unversioned session record is not treated as absent mount state."""
+    with (
+        patch("dislocker_ui.elevate.needs_elevation", return_value=False),
+        patch("dislocker_ui.runner.load_session", return_value=None),
+        patch("dislocker_ui.runner.legacy_session_present", return_value=True),
+        pytest.raises(RunnerError, match=r"pre-0\.3\.0"),
+    ):
+        unmount_volume(_deps(), lambda _m: None)
+
+
+def test_unmount_uses_canonical_path_for_all_cleanup_state() -> None:
+    """A Darwin unmount cleans the same canonical state file it loaded."""
+    canonical = Path("/var/db/dislocker-ui/501/active_session.json")
+    session = MountSession(
+        volume="/dev/disk2s1",
+        fuse_mount="/tmp/fuse",
+        dislocker_file="/tmp/fuse/dislocker-file",
+        raw_disk="/dev/disk9",
+        ntfs_mount="/Volumes/X",
+        readonly=True,
+        used_ntfs3g=True,
+    )
+    with (
+        patch("dislocker_ui.elevate.needs_elevation", return_value=True),
+        patch("dislocker_ui.session.root_session_path", return_value=canonical),
+        patch("dislocker_ui.runner.load_session", return_value=session),
+        patch("dislocker_ui.runner._unmount_ntfs", return_value=[]),
+        patch("dislocker_ui.runner._detach_raw_disk", return_value=[]),
+        patch("dislocker_ui.runner._unmount_fuse", return_value=[]),
+        patch("dislocker_ui.runner._remove_fuse_dir", return_value=[]) as remove_fuse,
+        patch("dislocker_ui.runner._remove_empty_ntfs_dir", return_value=[]),
+        patch("dislocker_ui.runner.clear_session") as clear,
+    ):
+        unmount_volume(_deps(), lambda _m: None)
+    assert remove_fuse.call_args.kwargs["session_path"] == canonical
+    clear.assert_called_once_with(canonical)
+
+
+def test_elevated_fuse_failure_names_the_diagnostic_log() -> None:
+    """Elevated FUSE failures preserve a useful diagnostic location."""
+    proc = MagicMock()
+    proc.poll.return_value = 1
+    proc.stdout = None
+    with pytest.raises(RunnerError, match=r"operation\.log"):
+        _wait_for_file(
+            Path("/tmp/missing-dislocker-file"),
+            proc,
+            lambda _m: None,
+            timeout_s=1,
+            diagnostic_log_path=Path("/var/db/dislocker-ui/501/operation.log"),
+        )
 
 
 def test_mount_in_process_when_already_root() -> None:

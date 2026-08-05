@@ -33,12 +33,23 @@ from enum import Enum
 from pathlib import Path
 
 from dislocker_ui.deps import DepsStatus
+from dislocker_ui.mount_policy import (
+    VOLUMES_ROOT,
+    is_physical_volume,
+    is_safe_volume_label,
+    privileged_staging_dir,
+)
 from dislocker_ui.ntfs_mount import assert_mount_owner as _assert_mount_owner
 from dislocker_ui.ntfs_mount import mount_ntfs as _mount_ntfs
-from dislocker_ui.session import MountSession, clear_session, load_session, save_session
+from dislocker_ui.session import (
+    MountSession,
+    clear_session,
+    legacy_session_present,
+    load_session,
+    save_session,
+)
 
 LogFn = Callable[[str], None]
-VOLUMES_ROOT = Path("/Volumes")
 
 
 class UnlockMethod(str, Enum):
@@ -94,13 +105,14 @@ def mount_volume(
                 "A session is already active. Click Unmount before mounting again.\n"
                 f"NTFS mount: {existing.ntfs_mount}"
             )
+        if legacy_session_present(session_path):
+            raise RunnerError(_legacy_session_recovery_message())
         # Hold the per-user lock across prepare + osascript so a concurrent
         # elevation cannot sweep this transaction's request/log files.
         with elevation_transaction() as (sess_path, log_path):
             target = session_path or sess_path
             return run_elevated_mount(
                 req,
-                deps,
                 log,
                 session_path=target,
                 log_path=log_path,
@@ -169,6 +181,11 @@ def _mount_in_process(
             fuse_proc,
             log,
             timeout_s=45,
+            diagnostic_log_path=(
+                session_path.parent / "operation.log"
+                if elevated and session_path is not None
+                else None
+            ),
         )
 
         log("Attaching raw NTFS image with hdiutil…")
@@ -225,16 +242,18 @@ def unmount_volume(
     from dislocker_ui.session import root_session_path
 
     canonical_path = (
-        session_path or root_session_path(os.getuid()) if needs_elevation() else session_path
+        (session_path or root_session_path(os.getuid())) if needs_elevation() else session_path
     )
     session = load_session(canonical_path)
     if session is None:
+        if legacy_session_present(session_path):
+            raise RunnerError(_legacy_session_recovery_message())
         raise RunnerError("No active session found to unmount")
 
     if session.elevated and needs_elevation():
         with elevation_transaction() as (sess_path, log_path):
             target = session_path or sess_path
-            run_elevated_unmount(deps, log, session_path=target, log_path=log_path)
+            run_elevated_unmount(log, session_path=target, log_path=log_path)
         return
 
     if session.elevated:
@@ -246,16 +265,25 @@ def unmount_volume(
     if not errors:
         errors.extend(
             _remove_fuse_dir(
-                session.fuse_mount, elevated=session.elevated, session_path=session_path
+                session.fuse_mount, elevated=session.elevated, session_path=canonical_path
             )
         )
         errors.extend(_remove_empty_ntfs_dir(session.ntfs_mount))
     if not errors:
-        clear_session(session_path)
+        clear_session(canonical_path)
     if errors:
         raise RunnerError("Unmount incomplete; state was retained for retry:\n" + "\n".join(errors))
     else:
         log("Unmounted successfully")
+
+
+def _legacy_session_recovery_message() -> str:
+    """Explain how to recover safely from untrusted pre-versioned state."""
+    return (
+        "A pre-0.3.0 session record was found and cannot be trusted for automated cleanup. "
+        "Unmount the existing volume manually, detach its raw disk, then remove the old "
+        "dislocker-ui session file before mounting or unmounting again."
+    )
 
 
 def _canonicalize_bek_secret(req: MountRequest) -> MountRequest:
@@ -433,6 +461,8 @@ def _wait_for_file(
     proc: subprocess.Popen[str],
     log: LogFn,
     timeout_s: float,
+    *,
+    diagnostic_log_path: Path | None = None,
 ) -> None:
     """Wait until dislocker-file exists or the fuse process exits."""
     deadline = time.time() + timeout_s
@@ -444,6 +474,8 @@ def _wait_for_file(
             detail = ""
             if proc.stdout is not None:
                 detail = proc.stdout.read() or ""
+            elif diagnostic_log_path is not None:
+                detail = f"See privileged diagnostic log: {diagnostic_log_path}"
             raise RunnerError(
                 "dislocker-fuse exited before creating dislocker-file.\n" + detail.strip()
             )
@@ -539,17 +571,13 @@ def _best_effort_cleanup(
     log("Partial cleanup done")
 
 
-_VOLUME_RE = re.compile(r"^/dev/disk\d+(s\d+)?$")
-_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$")
-
-
 def _validate_volume_label(label: str) -> None:
-    if not isinstance(label, str) or not _LABEL_RE.fullmatch(label) or label in {".", ".."}:
+    if not is_safe_volume_label(label):
         raise RunnerError("Volume label must be a short filesystem-safe display name")
 
 
 def _validate_elevated_request(req: MountRequest) -> None:
-    if not _VOLUME_RE.fullmatch(req.volume.strip()):
+    if not is_physical_volume(req.volume):
         raise RunnerError("Elevated mounts require a physical /dev/diskN or /dev/diskNsM device")
     if type(req.readonly) is not bool:
         raise RunnerError("readonly must be boolean")
@@ -558,8 +586,7 @@ def _validate_elevated_request(req: MountRequest) -> None:
 
 def _allocate_privileged_fuse_path(session_path: Path, uid: int) -> Path:
     """Create a root-owned FUSE staging directory below canonical state."""
-    state_dir = session_path.parent
-    staging = state_dir.parent / "staging" / str(uid)
+    staging = privileged_staging_dir(session_path, uid)
     staging.mkdir(mode=0o700, parents=True, exist_ok=True)
     return Path(tempfile.mkdtemp(prefix="session-", dir=str(staging)))
 
@@ -567,16 +594,16 @@ def _allocate_privileged_fuse_path(session_path: Path, uid: int) -> Path:
 def _is_privileged_fuse_path(path: Path, session_path: Path | None) -> bool:
     if session_path is None:
         return False
-    staging = session_path.parent.parent / "staging" / session_path.parent.name
     try:
+        staging = privileged_staging_dir(session_path, int(session_path.parent.name))
         return path.parent == staging and path.name.startswith("session-") and not path.is_symlink()
-    except OSError:
+    except (OSError, ValueError):
         return False
 
 
 def _validate_elevated_session(session: MountSession, session_path: Path | None) -> None:
     """Reject malformed root-state before privileged cleanup side effects."""
-    if not _VOLUME_RE.fullmatch(session.volume) or not _VOLUME_RE.fullmatch(session.raw_disk):
+    if not is_physical_volume(session.volume) or not is_physical_volume(session.raw_disk):
         raise RunnerError("Privileged session has an invalid device selector")
     if not _is_privileged_fuse_path(Path(session.fuse_mount), session_path):
         raise RunnerError("Privileged session FUSE path is outside application staging")

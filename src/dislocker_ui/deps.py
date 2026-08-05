@@ -125,7 +125,12 @@ def _is_trusted_executable(path: Path) -> bool:
     """True only for a root-owned regular executable below safe ancestors."""
     try:
         info = os.stat(path, follow_symlinks=False)
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or not info.st_mode & 0o111:
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != 0
+            or not info.st_mode & 0o111
+            or info.st_mode & 0o022
+        ):
             return False
         for parent in (path.parent, *path.parents):
             parent_info = os.stat(parent, follow_symlinks=False)

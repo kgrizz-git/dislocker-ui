@@ -141,7 +141,6 @@ def test_overlapping_elevation_transactions_are_serialized(
     release_holder = threading.Event()
     waiter_entered = threading.Event()
     errors: list[BaseException] = []
-    holder_log: list[Path] = []
     waiter_log: list[Path] = []
     # Observations recorded in threads; asserts stay on the main thread (S5779).
     holder_saw_release = threading.Event()
@@ -149,11 +148,10 @@ def test_overlapping_elevation_transactions_are_serialized(
 
     def holder() -> None:
         try:
-            with elevation_transaction() as (_sess, log_path):
+            with elevation_transaction():
                 # Mimic an in-flight request sitting beside the log.
                 req = support / "dislocker-ui-req-holder.json"
                 req.write_text('{"secret":"x"}', encoding="utf-8")
-                holder_log.append(log_path)
                 holder_ready.set()
                 if not release_holder.wait(timeout=5.0):
                     errors.append(TimeoutError("holder did not see release signal"))
@@ -162,7 +160,7 @@ def test_overlapping_elevation_transactions_are_serialized(
                 if req.exists():
                     holder_files_ok.set()
                 else:
-                    errors.append(RuntimeError("holder request/log deleted while lock held"))
+                    errors.append(RuntimeError("holder request deleted while lock held"))
         except Exception as exc:
             errors.append(exc)
 
@@ -198,7 +196,6 @@ def test_overlapping_elevation_transactions_are_serialized(
     assert waiter_log
     # After the holder released, waiter's prepare may sweep the holder's temps.
     assert not (support / "dislocker-ui-req-holder.json").exists()
-    assert not (support / "dislocker-ui-req-holder.json").exists()
 
 
 @pytest.mark.parametrize(
@@ -224,6 +221,7 @@ def test_validate_volume_path_accepts_only_physical_disk() -> None:
     """Elevated GUI mounting intentionally accepts physical disks only."""
     validate_volume_path("/dev/disk2")
     validate_volume_path("/dev/disk2s1")
+    validate_volume_path("/dev/disk2s1 ")
     with pytest.raises(RunnerError):
         validate_volume_path("/tmp/image.dmg")
     with pytest.raises(RunnerError):
@@ -280,10 +278,10 @@ def test_run_elevated_mount_success_loads_session(tmp_path: Path) -> None:
     with patch("dislocker_ui.elevate.subprocess.run", side_effect=fake_run):
         result = run_elevated_mount(
             req,
-            _deps(),
             logs.append,
             session_path=session_path,
             log_path=log_path,
+            request_dir=tmp_path,
         )
     assert result.ntfs_mount == "/Volumes/X"
     assert any("administrator" in line.lower() for line in logs)
@@ -319,16 +317,15 @@ def test_run_elevated_mount_cancel_unlinks_request(tmp_path: Path) -> None:
     with (
         patch("dislocker_ui.elevate.tempfile.mkstemp", side_effect=tracking_mkstemp),
         patch("dislocker_ui.elevate.subprocess.run", side_effect=fake_run),
+        pytest.raises(ElevationCancelled),
     ):
-        deps = _deps()
-        with pytest.raises(ElevationCancelled):
-            run_elevated_mount(
-                req,
-                deps,
-                lambda _m: None,
-                session_path=session_path,
-                log_path=log_path,
-            )
+        run_elevated_mount(
+            req,
+            lambda _m: None,
+            session_path=session_path,
+            log_path=log_path,
+            request_dir=tmp_path,
+        )
     assert created
     assert not created[0].exists()
 
@@ -344,6 +341,15 @@ def test_prepare_elevation_paths_returns_root_derived_state(
     monkeypatch.setattr(
         "dislocker_ui.session.default_session_path",
         lambda: support / "active_session.json",
+    )
+    state = tmp_path / "root-state"
+    monkeypatch.setattr(
+        "dislocker_ui.elevate.root_session_path",
+        lambda uid: state / str(uid) / "active_session.json",
+    )
+    monkeypatch.setattr(
+        "dislocker_ui.elevate.root_log_path",
+        lambda uid: state / str(uid) / "operation.log",
     )
 
     def _safe(path: Path, *, label: str) -> None:
@@ -379,8 +385,8 @@ def test_request_json_secret_is_last_key(tmp_path: Path) -> None:
     )
     path = _write_request(
         action="mount",
-        session_path=tmp_path / "s.json",
         req=req,
+        request_dir=tmp_path,
     )
     try:
         text = path.read_text(encoding="utf-8")
