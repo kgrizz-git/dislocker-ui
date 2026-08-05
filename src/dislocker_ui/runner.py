@@ -149,39 +149,15 @@ def _mount_in_process(
     """In-process mount pipeline (root / already elevated / non-Darwin)."""
     req = _canonicalize_bek_secret(req)
     volume = _validate_mount_request(req, deps, session_path=session_path)
-
-    if elevated:
-        _validate_elevated_request(req)
-        if session_path is None or uid is None:
-            raise RunnerError("privileged mount requires canonical session state")
-        try:
-            fuse_mount = allocate_privileged_fuse_path(session_path, uid)
-        except RuntimeError as exc:
-            raise RunnerError(str(exc)) from exc
-    else:
-        fuse_mount = Path(tempfile.mkdtemp(prefix="dislocker-ui-"))
+    fuse_mount = _prepare_fuse_mount(req, elevated=elevated, session_path=session_path, uid=uid)
     ntfs_mount = _allocate_volume_path(req.volume_label)
     fuse_proc: subprocess.Popen[str] | None = None
     raw_disk: str | None = None
-
     try:
         cmd = _build_dislocker_cmd(deps, req, fuse_mount)
         log("Starting dislocker-fuse…")
         log(_redact_cmd(cmd))
-        if elevated and fuse_log_handle is not None:
-            # The root helper owns and has already validated this open handle.
-            popen_kwargs: dict = {
-                "stdout": fuse_log_handle,
-                "stderr": subprocess.STDOUT,
-                "start_new_session": True,
-            }
-        else:
-            popen_kwargs = {
-                "stdout": subprocess.PIPE,
-                "stderr": subprocess.STDOUT,
-                "text": True,
-            }
-        fuse_proc = subprocess.Popen(cmd, **popen_kwargs)
+        fuse_proc = subprocess.Popen(cmd, **_fuse_popen_kwargs(elevated, fuse_log_handle))
 
         dislocker_file = fuse_mount / "dislocker-file"
         _wait_for_file(
@@ -189,11 +165,7 @@ def _mount_in_process(
             fuse_proc,
             log,
             timeout_s=45,
-            diagnostic_log_path=(
-                session_path.parent / "operation.log"
-                if elevated and session_path is not None
-                else None
-            ),
+            diagnostic_log_path=_diagnostic_log_path(elevated, session_path),
         )
 
         log("Attaching raw NTFS image with hdiutil…")
@@ -228,6 +200,44 @@ def _mount_in_process(
         if fuse_proc is not None and fuse_proc.poll() is None:
             fuse_proc.terminate()
         raise
+
+
+def _prepare_fuse_mount(
+    req: MountRequest, *, elevated: bool, session_path: Path | None, uid: int | None
+) -> Path:
+    """Allocate the FUSE directory under the applicable trust boundary."""
+    if not elevated:
+        return Path(tempfile.mkdtemp(prefix="dislocker-ui-"))
+    _validate_elevated_request(req)
+    if session_path is None or uid is None:
+        raise RunnerError("privileged mount requires canonical session state")
+    try:
+        return allocate_privileged_fuse_path(session_path, uid)
+    except RuntimeError as exc:
+        raise RunnerError(str(exc)) from exc
+
+
+def _fuse_popen_kwargs(elevated: bool, fuse_log_handle: object | None) -> dict[str, object]:
+    """Return safe process-output settings for the current mount mode."""
+    if elevated and fuse_log_handle is not None:
+        # The root helper owns and has already validated this open handle.
+        return {
+            "stdout": fuse_log_handle,
+            "stderr": subprocess.STDOUT,
+            "start_new_session": True,
+        }
+    return {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.STDOUT,
+        "text": True,
+    }
+
+
+def _diagnostic_log_path(elevated: bool, session_path: Path | None) -> Path | None:
+    """Return the canonical root diagnostic path when one is available."""
+    if elevated and session_path is not None:
+        return session_path.parent / "operation.log"
+    return None
 
 
 def unmount_volume(

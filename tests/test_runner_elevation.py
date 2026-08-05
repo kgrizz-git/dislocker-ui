@@ -28,6 +28,9 @@ from dislocker_ui.runner import (
     RunnerError,
     UnlockMethod,
     _canonicalize_bek_secret,
+    _diagnostic_log_path,
+    _fuse_popen_kwargs,
+    _prepare_fuse_mount,
     _wait_for_file,
     mount_volume,
     unmount_volume,
@@ -221,6 +224,51 @@ def test_mount_in_process_when_already_root() -> None:
     assert result is session
     inproc.assert_called_once()
     elev.assert_not_called()
+
+
+def test_elevated_fuse_setup_uses_canonical_staging_path() -> None:
+    """The elevated pipeline delegates FUSE staging to the shared policy."""
+    req = MountRequest(
+        volume="/dev/disk2s1",
+        method=UnlockMethod.USER_PASSWORD,
+        secret="x",
+        readonly=True,
+    )
+    session_path = Path("/var/db/dislocker-ui/501/active_session.json")
+    fuse_path = Path("/var/db/dislocker-ui/staging/501/session-test")
+    with patch(
+        "dislocker_ui.runner.allocate_privileged_fuse_path", return_value=fuse_path
+    ) as allocate:
+        assert (
+            _prepare_fuse_mount(req, elevated=True, session_path=session_path, uid=501) == fuse_path
+        )
+    allocate.assert_called_once_with(session_path, 501)
+
+
+def test_elevated_fuse_setup_requires_canonical_state() -> None:
+    """The root path never falls back to a regular temporary directory."""
+    req = MountRequest(
+        volume="/dev/disk2s1",
+        method=UnlockMethod.USER_PASSWORD,
+        secret="x",
+        readonly=True,
+    )
+    with pytest.raises(RunnerError, match="canonical session state"):
+        _prepare_fuse_mount(req, elevated=True, session_path=None, uid=501)
+
+
+def test_fuse_popen_output_and_diagnostic_paths_follow_elevation_mode() -> None:
+    """Elevated FUSE output uses the validated root log, never a user pipe."""
+    handle = MagicMock()
+    elevated = _fuse_popen_kwargs(True, handle)
+    standard = _fuse_popen_kwargs(False, handle)
+    session_path = Path("/var/db/dislocker-ui/501/active_session.json")
+    assert elevated["stdout"] is handle
+    assert elevated["start_new_session"] is True
+    assert standard["stdout"] is not handle
+    assert standard["text"] is True
+    assert _diagnostic_log_path(True, session_path) == session_path.parent / "operation.log"
+    assert _diagnostic_log_path(False, session_path) is None
 
 
 def test_unmount_reelevates_when_session_elevated() -> None:
