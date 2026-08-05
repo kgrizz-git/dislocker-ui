@@ -13,6 +13,7 @@ import contextlib
 import json
 import os
 import stat
+import sys
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -41,6 +42,18 @@ class MountSession:
 def default_session_path() -> Path:
     """Return the legacy, unprivileged session path without creating it."""
     return Path.home() / "Library" / "Application Support" / "dislocker-ui" / SESSION_FILE
+
+
+def active_session_path_for_user() -> Path:
+    """Return the session path used by this UI process without creating it.
+
+    The macOS GUI delegates mounts to the root helper, so its status reads must
+    use the helper's fixed per-UID state.  Other platforms and a directly-run
+    root process retain the legacy in-process session location.
+    """
+    if sys.platform == "darwin" and os.geteuid() != 0:
+        return root_session_path(os.getuid())
+    return default_session_path()
 
 
 def root_state_dir(uid: int, *, state_root: Path = ROOT_STATE_ROOT) -> Path:
@@ -92,13 +105,20 @@ def ensure_root_state_dir(uid: int, gid: int, *, state_root: Path = ROOT_STATE_R
     return directory
 
 
-def save_session(session: MountSession, path: Path | None = None) -> Path:
+def save_session(
+    session: MountSession,
+    path: Path | None = None,
+    *,
+    owner_gid: int | None = None,
+) -> Path:
     """Atomically write session JSON; return the path written."""
     target = path or default_session_path()
     target.parent.mkdir(parents=True, exist_ok=True)
     data = json.dumps(asdict(session), indent=2, sort_keys=True) + "\n"
     fd, name = tempfile.mkstemp(prefix=f".{target.name}.", dir=str(target.parent))
     try:
+        if owner_gid is not None:
+            os.fchown(fd, 0, owner_gid)
         os.fchmod(fd, 0o640 if session.elevated else 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             fd = -1

@@ -21,9 +21,11 @@ Requirements:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -43,6 +45,7 @@ from dislocker_ui.ntfs_mount import assert_mount_owner as _assert_mount_owner
 from dislocker_ui.ntfs_mount import mount_ntfs as _mount_ntfs
 from dislocker_ui.session import (
     MountSession,
+    active_session_path_for_user,
     clear_session,
     legacy_session_present,
     load_session,
@@ -93,12 +96,11 @@ def mount_volume(
     Privileged child calls this with elevated=True and euid==0 (no re-entry).
     """
     from dislocker_ui.elevate import elevation_transaction, needs_elevation, run_elevated_mount
-    from dislocker_ui.session import root_session_path
 
     if not elevated and needs_elevation():
         # Reject an already-active session here, before prompting for admin
         # credentials — the child would reject it anyway (exit 3).
-        canonical_path = session_path or root_session_path(os.getuid())
+        canonical_path = session_path or active_session_path_for_user()
         existing = load_session(canonical_path)
         if existing is not None:
             raise RunnerError(
@@ -204,7 +206,7 @@ def _mount_in_process(
             used_ntfs3g=used_ntfs3g,
             elevated=elevated,
         )
-        save_session(session, session_path)
+        save_session(session, session_path, owner_gid=gid if elevated else None)
         log(f"Mounted successfully at {ntfs_mount}")
         return session
 
@@ -220,10 +222,6 @@ def _mount_in_process(
         if fuse_proc is not None and fuse_proc.poll() is None:
             fuse_proc.terminate()
         raise
-    finally:
-        # The privileged child owns the log descriptor and closes it after the
-        # complete operation.  Do not reopen or close it here.
-        pass
 
 
 def unmount_volume(
@@ -239,10 +237,9 @@ def unmount_volume(
     (second admin prompt — accepted for 0.2.0).
     """
     from dislocker_ui.elevate import elevation_transaction, needs_elevation, run_elevated_unmount
-    from dislocker_ui.session import root_session_path
 
     canonical_path = (
-        (session_path or root_session_path(os.getuid())) if needs_elevation() else session_path
+        (session_path or active_session_path_for_user()) if needs_elevation() else session_path
     )
     session = load_session(canonical_path)
     if session is None:
@@ -399,6 +396,8 @@ def _remove_fuse_dir(
             shutil.rmtree(fuse_path)
     except OSError as exc:
         return [f"Could not remove FUSE staging directory {fuse_path}: {exc}"]
+    if elevated:
+        _remove_empty_privileged_staging_parents(fuse_path, session_path)
     return []
 
 
@@ -520,7 +519,11 @@ def _allocate_volume_path(label: str) -> Path:
         try:
             candidate.mkdir(mode=0o755)
             info = os.lstat(candidate)
-            if candidate.parent != VOLUMES_ROOT or not info:
+            if (
+                candidate.parent != VOLUMES_ROOT
+                or stat.S_ISLNK(info.st_mode)
+                or not stat.S_ISDIR(info.st_mode)
+            ):
                 raise RunnerError("mountpoint creation escaped /Volumes")
             return candidate
         except FileExistsError:
@@ -586,8 +589,35 @@ def _validate_elevated_request(req: MountRequest) -> None:
 def _allocate_privileged_fuse_path(session_path: Path, uid: int) -> Path:
     """Create a root-owned FUSE staging directory below canonical state."""
     staging = privileged_staging_dir(session_path, uid)
-    staging.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _ensure_private_staging_dir(staging.parent)
+    _ensure_private_staging_dir(staging)
     return Path(tempfile.mkdtemp(prefix="session-", dir=str(staging)))
+
+
+def _ensure_private_staging_dir(path: Path) -> None:
+    """Create and verify one private root-helper staging directory."""
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = os.lstat(path)
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid():
+        raise RunnerError("Privileged staging directory ownership or type is unsafe")
+    # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions -- root-helper staging must not be readable by other users
+    os.chmod(path, 0o700)
+
+
+def _remove_empty_privileged_staging_parents(fuse_path: Path, session_path: Path | None) -> None:
+    """Remove now-empty trusted staging directories without affecting unmount success."""
+    if session_path is None:
+        return
+    try:
+        staging = privileged_staging_dir(session_path, int(session_path.parent.name))
+    except ValueError:
+        return
+    if fuse_path.parent != staging:
+        return
+    with contextlib.suppress(OSError):
+        staging.rmdir()
+    with contextlib.suppress(OSError):
+        staging.parent.rmdir()
 
 
 def _is_privileged_fuse_path(path: Path, session_path: Path | None) -> bool:

@@ -22,9 +22,9 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from dislocker_ui import __version__
-from dislocker_ui.deps import DepsStatus, discover_deps
+from dislocker_ui.deps import DepsStatus, discover_deps, discover_privileged_deps
 from dislocker_ui.disks import DiskEntry, list_disk_entries
-from dislocker_ui.elevate import ElevationCancelled, ElevationTimedOut
+from dislocker_ui.elevate import ElevationCancelled, ElevationTimedOut, needs_elevation
 from dislocker_ui.runner import (
     MountRequest,
     RunnerError,
@@ -32,7 +32,7 @@ from dislocker_ui.runner import (
     mount_volume,
     unmount_volume,
 )
-from dislocker_ui.session import load_session
+from dislocker_ui.session import active_session_path_for_user, load_session
 
 
 class DislockerApp(ttk.Frame):
@@ -197,7 +197,7 @@ class DislockerApp(ttk.Frame):
 
     def _refresh_session_status(self) -> None:
         """Show whether a session is currently recorded."""
-        session = load_session()
+        session = load_session(active_session_path_for_user())
         if session:
             mode = "RO" if session.readonly else "RW"
             self.status_var.set(f"Active session ({mode}): {session.ntfs_mount}")
@@ -238,6 +238,18 @@ class DislockerApp(ttk.Frame):
         if not self.deps.core_ok:
             messagebox.showerror("Missing tools", "Install required tools first (see README).")
             return
+        if needs_elevation():
+            privileged_deps = discover_privileged_deps()
+            if not privileged_deps.core_ok:
+                missing = ", ".join(privileged_deps.missing_core())
+                messagebox.showerror(
+                    "Privileged tools unavailable",
+                    "Mounting requires root-managed tools before administrator authorization.\n\n"
+                    f"Missing trusted tools: {missing}\n\n"
+                    "An administrator must install dislocker-fuse and ntfs-3g under "
+                    "/usr/local/sbin or /opt/local/sbin. See README.",
+                )
+                return
 
         method = UnlockMethod(self.method_var.get())
         req = MountRequest(

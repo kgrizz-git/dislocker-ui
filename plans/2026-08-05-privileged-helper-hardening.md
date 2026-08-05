@@ -96,6 +96,10 @@ design, rather than creating a parallel protocol:
   before it serializes the request.
 - Preserve manual recovery guidance for legacy state, finalization failures,
   and FUSE failures whose output is routed to the privileged diagnostic log.
+- Read elevated session status from the same canonical path in the GUI and
+  preflight the trusted root toolchain before prompting for authorization.
+- Redact password and BEK argument variants from unexpected helper errors, and
+  keep the root-owned FUSE staging tree private and free of empty parents.
 
 ## Ordered work packages
 

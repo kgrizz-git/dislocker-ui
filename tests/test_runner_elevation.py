@@ -23,7 +23,9 @@ from dislocker_ui.runner import (
     MountRequest,
     RunnerError,
     UnlockMethod,
+    _allocate_privileged_fuse_path,
     _canonicalize_bek_secret,
+    _remove_fuse_dir,
     _wait_for_file,
     mount_volume,
     unmount_volume,
@@ -157,7 +159,7 @@ def test_unmount_uses_canonical_path_for_all_cleanup_state() -> None:
     )
     with (
         patch("dislocker_ui.elevate.needs_elevation", return_value=True),
-        patch("dislocker_ui.session.root_session_path", return_value=canonical),
+        patch("dislocker_ui.runner.active_session_path_for_user", return_value=canonical),
         patch("dislocker_ui.runner.load_session", return_value=session),
         patch("dislocker_ui.runner._unmount_ntfs", return_value=[]),
         patch("dislocker_ui.runner._detach_raw_disk", return_value=[]),
@@ -184,6 +186,18 @@ def test_elevated_fuse_failure_names_the_diagnostic_log() -> None:
             timeout_s=1,
             diagnostic_log_path=Path("/var/db/dislocker-ui/501/operation.log"),
         )
+
+
+def test_privileged_staging_is_private_and_empty_parents_are_removed(tmp_path: Path) -> None:
+    """Privileged staging is mode 0700 and leaves no empty per-user parents."""
+    session_path = tmp_path / "501" / "active_session.json"
+    staging = tmp_path / "staging" / "501"
+    staging.mkdir(parents=True, mode=0o755)
+    fuse_path = _allocate_privileged_fuse_path(session_path, 501)
+    assert fuse_path.parent.stat().st_mode & 0o777 == 0o700
+    assert _remove_fuse_dir(str(fuse_path), elevated=True, session_path=session_path) == []
+    assert not staging.exists()
+    assert not staging.parent.exists()
 
 
 def test_mount_in_process_when_already_root() -> None:

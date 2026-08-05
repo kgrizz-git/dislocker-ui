@@ -30,7 +30,6 @@ from dislocker_ui.elevate import (
     elevation_transaction,
     needs_elevation,
     run_elevated_mount,
-    serialize_deps,
     validate_volume_path,
 )
 from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod
@@ -102,7 +101,7 @@ def test_applescript_contains_request_path_not_secret(tmp_path: Path) -> None:
 
 
 def test_sweep_stale_elevation_files(tmp_path: Path) -> None:
-    """Stale request/log temp files are removed; unrelated files are kept."""
+    """Stale requests are removed while root-owned logs and other files are kept."""
     from dislocker_ui.elevate import _sweep_stale_elevation_files
 
     (tmp_path / "dislocker-ui-req-abc.json").write_text("{}", encoding="utf-8")
@@ -113,7 +112,7 @@ def test_sweep_stale_elevation_files(tmp_path: Path) -> None:
     lock.write_text("", encoding="utf-8")
     _sweep_stale_elevation_files(tmp_path)
     assert not (tmp_path / "dislocker-ui-req-abc.json").exists()
-    assert not (tmp_path / "dislocker-ui-log-xyz.log").exists()
+    assert (tmp_path / "dislocker-ui-log-xyz.log").exists()
     assert keep.exists()
     assert lock.exists()
 
@@ -226,21 +225,6 @@ def test_validate_volume_path_accepts_only_physical_disk() -> None:
         validate_volume_path("/tmp/image.dmg")
     with pytest.raises(RunnerError):
         validate_volume_path("/dev/rdisk0")
-
-
-def test_serialize_deps_never_exports_paths() -> None:
-    """The parent cannot select binaries for the root child."""
-    # Use real existing paths from the test environment where possible.
-    python = Path("/bin/sh")
-    deps = DepsStatus(
-        dislocker_fuse=str(python),
-        hdiutil=str(python),
-        diskutil=str(python),
-        umount=str(python),
-        ntfs3g=str(python),
-    )
-    out = serialize_deps(deps)
-    assert out == {}
 
 
 def test_run_elevated_mount_success_loads_session(tmp_path: Path) -> None:

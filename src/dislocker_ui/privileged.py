@@ -88,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
                 fuse_log_handle=log_fp,
             )
             try:
-                _make_session_readable(session_path, gid)
+                _verify_session_readable(session_path, gid)
             except RunnerError as exc:
                 log(
                     f"Mount succeeded at {session.ntfs_mount}, but session state could not be "
@@ -272,11 +272,9 @@ def _open_root_log(path: Path, state_dir: Path, gid: int) -> TextIO:
         raise _ValidationError(f"cannot open root log: {exc}") from exc
 
 
-def _make_session_readable(path: Path, gid: int) -> None:
-    """Set the fixed root session to root:*gid* mode 0640 after atomic replace."""
+def _verify_session_readable(path: Path, gid: int) -> None:
+    """Verify the atomic session write has the intended root:*gid* mode."""
     try:
-        os.chown(path, 0, gid)
-        os.chmod(path, 0o640)
         info = os.lstat(path)
     except OSError as exc:
         raise RunnerError(f"cannot finalize privileged session permissions: {exc}") from exc
@@ -302,7 +300,11 @@ def _format_unexpected(exc: BaseException) -> str:
     composed = f"unexpected error: {exc}\n" + "".join(
         traceback.format_exception(type(exc), exc, exc.__traceback__)
     )
-    return re.sub(r"(--(?:user|recovery)-password=)\S*", r"\1***", composed)
+    return re.sub(
+        r"(?P<option>--(?:user|recovery)-password|--bekfile)(?P<separator>=|[ \t]+)\S+",
+        r"\g<option>\g<separator>***",
+        composed,
+    )
 
 
 if __name__ == "__main__":

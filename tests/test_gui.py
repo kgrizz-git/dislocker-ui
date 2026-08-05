@@ -20,6 +20,7 @@ Requirements:
 from __future__ import annotations
 
 import tkinter as tk
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -98,6 +99,12 @@ def tk_root() -> tk.Tk:
         yield root
     finally:
         root.destroy()
+
+
+@pytest.fixture(autouse=True)
+def no_elevation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep GUI unit tests independent of the host platform's privilege state."""
+    monkeypatch.setattr("dislocker_ui.gui.needs_elevation", lambda: False)
 
 
 def _build_app(
@@ -183,6 +190,19 @@ def test_init_active_session_status(tk_root: tk.Tk) -> None:
     app = _build_app(tk_root, session=session)
     assert "Active session (RW)" in app.status_var.get()
     assert "/Volumes/DislockerUI" in app.status_var.get()
+
+
+def test_init_reads_the_canonical_active_session_path(tk_root: tk.Tk) -> None:
+    """Status display asks for the same root-owned path as elevated operations."""
+    canonical = Path("/var/db/dislocker-ui/501/active_session.json")
+    with (
+        patch("dislocker_ui.gui.discover_deps", return_value=_core_deps()),
+        patch("dislocker_ui.gui.list_disk_entries", return_value=_sample_disks()),
+        patch("dislocker_ui.gui.active_session_path_for_user", return_value=canonical),
+        patch("dislocker_ui.gui.load_session", return_value=None) as load,
+    ):
+        DislockerApp(tk_root)
+    load.assert_called_once_with(canonical)
 
 
 def test_rw_available_when_ntfs3g_present(tk_root: tk.Tk) -> None:
@@ -286,6 +306,35 @@ def test_on_mount_blocked_when_missing_tools(tk_root: tk.Tk) -> None:
     showerror.assert_called_once()
     mount_volume.assert_not_called()
     assert app._busy is False
+
+
+def test_on_mount_preflights_privileged_tools_before_prompt(tk_root: tk.Tk) -> None:
+    """A missing trusted root toolchain blocks Mount before any elevation work."""
+    app = _build_app(tk_root, deps=_core_deps())
+    with (
+        patch("dislocker_ui.gui.needs_elevation", return_value=True),
+        patch("dislocker_ui.gui.discover_privileged_deps", return_value=_missing_deps()),
+        patch("dislocker_ui.gui.messagebox.showerror") as showerror,
+        patch("dislocker_ui.gui.mount_volume") as mount,
+    ):
+        app.on_mount()
+    assert "root-managed" in showerror.call_args.args[1]
+    mount.assert_not_called()
+    assert app._busy is False
+
+
+def test_on_mount_allows_a_trusted_privileged_toolchain(tk_root: tk.Tk, sync_threads: None) -> None:
+    """A complete trusted toolchain preserves the regular Mount flow."""
+    app = _build_app(tk_root, deps=_core_deps())
+    with (
+        patch("dislocker_ui.gui.needs_elevation", return_value=True),
+        patch("dislocker_ui.gui.discover_privileged_deps", return_value=_core_deps()),
+        patch("dislocker_ui.gui.mount_volume", return_value=_sample_session()) as mount,
+        patch("dislocker_ui.gui.load_session", return_value=_sample_session()),
+        patch("dislocker_ui.gui.messagebox.showinfo"),
+    ):
+        app.on_mount()
+    mount.assert_called_once()
 
 
 def test_on_mount_noop_when_busy(tk_root: tk.Tk) -> None:

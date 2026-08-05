@@ -40,7 +40,6 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from dislocker_ui import session as session_mod
-from dislocker_ui.deps import DepsStatus
 from dislocker_ui.mount_policy import is_physical_volume
 from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod
 from dislocker_ui.session import MountSession, load_session, root_log_path, root_session_path
@@ -204,8 +203,8 @@ def _elevation_lock(directory: Path) -> Iterator[None]:
 
 
 def _sweep_stale_elevation_files(directory: Path) -> None:
-    """Best-effort removal of request/log temp files left by a prior run."""
-    for pattern in ("dislocker-ui-req-*.json", "dislocker-ui-log-*.log"):
+    """Best-effort removal of stale request files left by a prior run."""
+    for pattern in ("dislocker-ui-req-*.json",):
         for stale in directory.glob(pattern):
             _unlink_quiet(stale)
 
@@ -228,12 +227,6 @@ def validate_volume_path(volume: str) -> None:
     raise RunnerError(
         f"Refusing to elevate for volume path (must be /dev/diskN or /dev/diskNsM): {volume}"
     )
-
-
-def serialize_deps(deps: DepsStatus) -> dict[str, str]:
-    """Retained for compatibility; dependency paths are never sent to root."""
-    del deps
-    return {}
 
 
 def build_osascript(shell_command: str, *, prompt: str = _ADMIN_PROMPT) -> str:

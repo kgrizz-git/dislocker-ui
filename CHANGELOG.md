@@ -25,6 +25,9 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
   from `/usr/local/sbin` or `/opt/local/sbin`, plus fixed macOS system tools.
   User-owned Homebrew paths remain useful for GUI preflight but are not executed
   as root.
+- The GUI now shows elevated-session status from the canonical root-owned state
+  file and reports a missing trusted toolchain before requesting administrator
+  authorization.
 
 ## [0.2.0] - 2026-07-31
 

@@ -14,6 +14,7 @@ import pytest
 from dislocker_ui.privileged import (
     EXIT_RUNNER,
     EXIT_VALIDATION,
+    _format_unexpected,
     _load_and_unlink_request,
     _request_entry_name,
     _validate_request,
@@ -215,7 +216,7 @@ def test_main_mount_uses_only_root_derived_state_and_deps(tmp_path: Path) -> Non
             "dislocker_ui.privileged.mount_volume",
             return_value=MagicMock(ntfs_mount="/Volumes/USB"),
         ) as mount,
-        patch("dislocker_ui.privileged._make_session_readable") as finalize,
+        patch("dislocker_ui.privileged._verify_session_readable") as finalize,
     ):
         from dislocker_ui.privileged import EXIT_OK, main
 
@@ -247,7 +248,7 @@ def test_main_logs_manual_recovery_when_session_finalization_fails(tmp_path: Pat
         ),
         patch("dislocker_ui.privileged.mount_volume", return_value=session),
         patch(
-            "dislocker_ui.privileged._make_session_readable",
+            "dislocker_ui.privileged._verify_session_readable",
             side_effect=RunnerError("permission update failed"),
         ),
     ):
@@ -258,6 +259,22 @@ def test_main_logs_manual_recovery_when_session_finalization_fails(tmp_path: Pat
         "Manually unmount /Volumes/USB, detach /dev/disk9" in call.args[0]
         for call in log.write.call_args_list
     )
+
+
+@pytest.mark.parametrize(
+    "argument",
+    [
+        "--user-password=top-secret",
+        "--recovery-password top-secret",
+        "--bekfile /private/key.bek",
+    ],
+)
+def test_unexpected_error_redacts_all_supported_secret_argument_forms(argument: str) -> None:
+    """Unexpected logs must not expose password or BEK command arguments."""
+    rendered = _format_unexpected(RuntimeError(f"failed command: {argument}"))
+    assert "top-secret" not in rendered
+    assert "/private/key.bek" not in rendered
+    assert "***" in rendered
 
 
 def test_main_unmount_uses_canonical_session(tmp_path: Path) -> None:
