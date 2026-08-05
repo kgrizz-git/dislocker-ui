@@ -73,7 +73,7 @@ def ensure_root_state_dir(uid: int, gid: int, *, state_root: Path = ROOT_STATE_R
         # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions -- root-owned state root must be traversable by per-user groups
         os.chmod(root, 0o755)
         directory = root_state_dir(uid, state_root=root)
-        directory.mkdir(mode=0o750, exist_ok=True)
+        directory.mkdir(mode=0o700, exist_ok=True)
         os.chown(directory, 0, gid)
         # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions -- user group may read fixed status files but cannot modify entries
         os.chmod(directory, 0o750)

@@ -14,6 +14,7 @@ from dislocker_ui.privileged import (
     EXIT_RUNNER,
     EXIT_VALIDATION,
     _load_and_unlink_request,
+    _request_entry_name,
     _validate_request,
     _ValidationError,
 )
@@ -33,7 +34,7 @@ def _payload() -> dict[str, object]:
 
 
 def _request(base: Path, payload: dict[str, object]) -> Path:
-    path = base / "request.json"
+    path = base / "dislocker-ui-req-test123.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     path.chmod(0o600)
     return path
@@ -44,7 +45,8 @@ def test_request_descriptor_loader_accepts_private_regular_file(tmp_path: Path) 
     base = tmp_path / "requests"
     base.mkdir(mode=0o700)
     request = _request(base, _payload())
-    assert _load_and_unlink_request(request, base, os.getuid())["action"] == "mount"
+    name = _request_entry_name(request, base)
+    assert _load_and_unlink_request(name, base, os.getuid())["action"] == "mount"
     assert not request.exists()
 
 
@@ -53,10 +55,19 @@ def test_request_descriptor_loader_rejects_symlink(tmp_path: Path) -> None:
     base = tmp_path / "requests"
     base.mkdir(mode=0o700)
     real = _request(base, _payload())
-    link = base / "request-link.json"
+    link = base / "dislocker-ui-req-link123.json"
     link.symlink_to(real)
     with pytest.raises(_ValidationError, match="cannot read request"):
-        _load_and_unlink_request(link, base, os.getuid())
+        _load_and_unlink_request(_request_entry_name(link, base), base, os.getuid())
+
+
+@pytest.mark.parametrize("value", ["relative.json", "/tmp/request.json"])
+def test_request_entry_name_rejects_escape(value: str, tmp_path: Path) -> None:
+    """The privileged child accepts one generated entry directly below its base."""
+    base = tmp_path / "requests"
+    base.mkdir(mode=0o700)
+    with pytest.raises(_ValidationError):
+        _request_entry_name(Path(value), base)
 
 
 def test_request_rejects_old_root_authority_fields() -> None:

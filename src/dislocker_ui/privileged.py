@@ -35,6 +35,7 @@ EXIT_RUNNER = 3
 EXIT_UNEXPECTED = 4
 _VOLUME_RE = re.compile(r"^/dev/disk\d+(s\d+)?$")
 _LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$")
+_REQUEST_NAME_RE = re.compile(r"^dislocker-ui-req-[A-Za-z0-9]{6,}\.json$")
 
 
 class _ValidationError(ValueError):
@@ -52,7 +53,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         os.chdir("/")
         user_base = _user_base(args.uid)
-        payload = _load_and_unlink_request(args.request, user_base, args.uid)
+        request_name = _request_entry_name(args.request, user_base)
+        payload = _load_and_unlink_request(request_name, user_base, args.uid)
         _validate_request(payload, expected_action=args.action, expected_uid=args.uid)
         uid, gid = args.uid, int(payload["gid"])
         state_dir = ensure_root_state_dir(uid, gid)
@@ -65,7 +67,8 @@ def main(argv: list[str] | None = None) -> int:
         log_fp.flush()
 
         def log(message: str) -> None:
-            assert log_fp is not None
+            if log_fp is None:
+                raise RunnerError("privileged diagnostic log is unavailable")
             log_fp.write(message + "\n")
             log_fp.flush()
 
@@ -129,17 +132,30 @@ def _assert_safe_base(base: Path, uid: int) -> None:
         raise _ValidationError("request directory ownership or mode is unsafe")
 
 
-def _load_and_unlink_request(path: Path, base: Path, owner_uid: int) -> dict[str, Any]:
+def _request_entry_name(path: Path, base: Path) -> str:
+    """Validate the one request entry accepted below the already-checked base."""
+    if not path.is_absolute():
+        raise _ValidationError("request path must be absolute")
+    try:
+        relative = path.relative_to(base)
+    except ValueError as exc:
+        raise _ValidationError("request must be inside the request directory") from exc
+    if len(relative.parts) != 1 or not _REQUEST_NAME_RE.fullmatch(relative.name):
+        raise _ValidationError("request entry name is invalid")
+    return relative.name
+
+
+def _load_and_unlink_request(name: str, base: Path, owner_uid: int) -> dict[str, Any]:
     """Read a verified request descriptor, then unlink its exact directory entry."""
-    if path.parent != base or path.name != Path(path.name).name:
-        raise _ValidationError("request must be directly inside the request directory")
+    if not _REQUEST_NAME_RE.fullmatch(name):
+        raise _ValidationError("request entry name is invalid")
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         dir_fd = os.open(str(base), flags)
     except OSError as exc:
         raise _ValidationError(f"cannot open request directory: {exc}") from exc
     try:
-        fd = os.open(path.name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd)
+        fd = os.open(name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=dir_fd)
         try:
             info = os.fstat(fd)
             if not stat.S_ISREG(info.st_mode) or info.st_uid != owner_uid:
@@ -154,7 +170,7 @@ def _load_and_unlink_request(path: Path, base: Path, owner_uid: int) -> dict[str
                 os.close(fd)
         # This removes a replacement directory entry without ever following it.
         with contextlib.suppress(OSError):
-            os.unlink(path.name, dir_fd=dir_fd)
+            os.unlink(name, dir_fd=dir_fd)
     except OSError as exc:
         raise _ValidationError(f"cannot read request: {exc}") from exc
     finally:
