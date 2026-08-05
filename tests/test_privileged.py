@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -132,3 +133,62 @@ def test_main_rejects_invalid_request_before_state_creation(tmp_path: Path) -> N
             main(["mount", "--uid", str(os.getuid()), "--request", str(request)]) == EXIT_VALIDATION
         )
     ensure.assert_not_called()
+
+
+def test_main_mount_uses_only_root_derived_state_and_deps(tmp_path: Path) -> None:
+    """A valid request mounts through the root-derived paths and trusted deps."""
+    base = tmp_path / "requests"
+    base.mkdir(mode=0o700)
+    request = _request(base, _payload())
+    state = tmp_path / "state"
+    state.mkdir()
+    log = StringIO()
+    deps = MagicMock(core_ok=True)
+    with (
+        patch("dislocker_ui.privileged._user_base", return_value=base),
+        patch("dislocker_ui.privileged.ensure_root_state_dir", return_value=state),
+        patch(
+            "dislocker_ui.privileged.root_session_path", return_value=state / "active_session.json"
+        ),
+        patch("dislocker_ui.privileged.root_log_path", return_value=state / "operation.log"),
+        patch("dislocker_ui.privileged._open_root_log", return_value=log),
+        patch("dislocker_ui.privileged.discover_privileged_deps", return_value=deps),
+        patch(
+            "dislocker_ui.privileged.mount_volume",
+            return_value=MagicMock(ntfs_mount="/Volumes/USB"),
+        ) as mount,
+        patch("dislocker_ui.privileged._make_session_readable") as finalize,
+    ):
+        from dislocker_ui.privileged import EXIT_OK, main
+
+        assert main(["mount", "--uid", str(os.getuid()), "--request", str(request)]) == EXIT_OK
+    assert mount.call_args.kwargs["session_path"] == state / "active_session.json"
+    assert mount.call_args.kwargs["elevated"] is True
+    finalize.assert_called_once_with(state / "active_session.json", os.getgid())
+
+
+def test_main_unmount_uses_canonical_session(tmp_path: Path) -> None:
+    """Unmount carries no user-selected cleanup path through the request."""
+    base = tmp_path / "requests"
+    base.mkdir(mode=0o700)
+    request = _request(base, {"action": "unmount", "uid": os.getuid(), "gid": os.getgid()})
+    state = tmp_path / "state"
+    state.mkdir()
+    log = StringIO()
+    with (
+        patch("dislocker_ui.privileged._user_base", return_value=base),
+        patch("dislocker_ui.privileged.ensure_root_state_dir", return_value=state),
+        patch(
+            "dislocker_ui.privileged.root_session_path", return_value=state / "active_session.json"
+        ),
+        patch("dislocker_ui.privileged.root_log_path", return_value=state / "operation.log"),
+        patch("dislocker_ui.privileged._open_root_log", return_value=log),
+        patch(
+            "dislocker_ui.privileged.discover_privileged_deps", return_value=MagicMock(core_ok=True)
+        ),
+        patch("dislocker_ui.privileged.unmount_volume") as unmount,
+    ):
+        from dislocker_ui.privileged import EXIT_OK, main
+
+        assert main(["unmount", "--uid", str(os.getuid()), "--request", str(request)]) == EXIT_OK
+    assert unmount.call_args.kwargs["session_path"] == state / "active_session.json"

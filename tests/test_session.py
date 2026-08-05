@@ -14,7 +14,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from dislocker_ui.session import MountSession, clear_session, load_session, save_session
+from dislocker_ui.session import (
+    MountSession,
+    clear_session,
+    load_session,
+    root_log_path,
+    root_session_path,
+    root_state_dir,
+    save_session,
+)
 
 
 def _sample_session() -> MountSession:
@@ -71,3 +79,18 @@ def test_clear_session_removes_file(tmp_path: Path) -> None:
 def test_clear_session_missing_is_ok(tmp_path: Path) -> None:
     """clear_session is a no-op when the file is already gone."""
     clear_session(tmp_path / "nope.json")
+
+
+def test_root_state_paths_are_fixed_per_uid(tmp_path: Path) -> None:
+    """Canonical privileged state is derived from UID, never request content."""
+    assert root_state_dir(501, state_root=tmp_path) == tmp_path / "501"
+    assert root_session_path(501, state_root=tmp_path) == tmp_path / "501" / "active_session.json"
+    assert root_log_path(501, state_root=tmp_path) == tmp_path / "501" / "operation.log"
+
+
+def test_root_state_path_rejects_negative_uid() -> None:
+    """UID validation prevents traversal-like canonical state construction."""
+    import pytest
+
+    with pytest.raises(ValueError, match="negative"):
+        root_state_dir(-1)
