@@ -122,9 +122,16 @@ def discover_privileged_deps() -> DepsStatus:
 
 
 def _is_trusted_executable(path: Path) -> bool:
-    """True only for a root-owned regular executable below safe ancestors."""
+    """True only for a trusted regular executable behind a trusted path."""
     try:
-        info = os.stat(path, follow_symlinks=False)
+        entry = os.lstat(path)
+        if stat.S_ISLNK(entry.st_mode):
+            if entry.st_uid != 0:
+                return False
+            target = path.resolve(strict=True)
+        else:
+            target = path
+        info = os.stat(target, follow_symlinks=False)
         if (
             not stat.S_ISREG(info.st_mode)
             or info.st_uid != 0
@@ -132,12 +139,24 @@ def _is_trusted_executable(path: Path) -> bool:
             or info.st_mode & 0o022
         ):
             return False
-        for parent in (path.parent, *path.parents):
-            parent_info = os.stat(parent, follow_symlinks=False)
-            if not stat.S_ISDIR(parent_info.st_mode) or parent_info.st_uid != 0:
-                return False
-            if parent_info.st_mode & 0o022:
-                return False
+        if not _has_trusted_ancestors(path) or (
+            target != path and not _has_trusted_ancestors(target)
+        ):
+            return False
     except OSError:
         return False
+    return True
+
+
+def _has_trusted_ancestors(path: Path) -> bool:
+    """Return whether every directory leading to *path* is root-managed."""
+    for parent in path.parents:
+        parent_info = os.lstat(parent)
+        if (
+            stat.S_ISLNK(parent_info.st_mode)
+            or not stat.S_ISDIR(parent_info.st_mode)
+            or parent_info.st_uid != 0
+            or parent_info.st_mode & 0o022
+        ):
+            return False
     return True

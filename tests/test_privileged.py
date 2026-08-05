@@ -16,6 +16,7 @@ from dislocker_ui.privileged import (
     EXIT_VALIDATION,
     _format_unexpected,
     _load_and_unlink_request,
+    _open_root_log,
     _request_entry_name,
     _validate_request,
     _ValidationError,
@@ -163,7 +164,7 @@ def test_main_fails_before_mount_when_trusted_deps_missing(tmp_path: Path) -> No
             "dislocker_ui.privileged.root_session_path", return_value=state / "active_session.json"
         ),
         patch("dislocker_ui.privileged.root_log_path", return_value=state / "operation.log"),
-        patch("dislocker_ui.privileged.os.fchown"),
+        patch("dislocker_ui.privileged._open_root_log", return_value=StringIO()),
         patch(
             "dislocker_ui.privileged.discover_privileged_deps",
             return_value=MagicMock(core_ok=False, missing_core=lambda: ["ntfs-3g"]),
@@ -275,6 +276,15 @@ def test_unexpected_error_redacts_all_supported_secret_argument_forms(argument: 
     assert "top-secret" not in rendered
     assert "/private/key.bek" not in rendered
     assert "***" in rendered
+
+
+def test_root_log_rejects_a_non_root_caller(tmp_path: Path) -> None:
+    """The root-only log writer never implies support for unprivileged callers."""
+    with (
+        patch("dislocker_ui.privileged.os.geteuid", return_value=501),
+        pytest.raises(_ValidationError, match="privileged helper"),
+    ):
+        _open_root_log(tmp_path / "operation.log", tmp_path, 20)
 
 
 def test_main_unmount_uses_canonical_session(tmp_path: Path) -> None:

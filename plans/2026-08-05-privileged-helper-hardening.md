@@ -100,6 +100,9 @@ design, rather than creating a parallel protocol:
   preflight the trusted root toolchain before prompting for authorization.
 - Redact password and BEK argument variants from unexpected helper errors, and
   keep the root-owned FUSE staging tree private and free of empty parents.
+- Accept only root-owned symlinked tools whose link path and fully resolved
+  target path both remain root-managed; extract the elevated staging/session
+  policy from `runner.py` to keep it below the source-size soft cap.
 
 ## Ordered work packages
 

@@ -124,6 +124,8 @@ def save_session(
             fd = -1
             handle.write(data)
             handle.flush()
+            # Keep the descriptor open through fsync; an error still closes it
+            # via the context manager and removes the uncommitted temp file.
             os.fsync(handle.fileno())
         os.replace(name, target)
         return target

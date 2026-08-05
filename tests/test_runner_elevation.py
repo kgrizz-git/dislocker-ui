@@ -19,13 +19,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dislocker_ui.deps import DepsStatus
+from dislocker_ui.mount_policy import (
+    allocate_privileged_fuse_path,
+    remove_empty_privileged_staging_parents,
+)
 from dislocker_ui.runner import (
     MountRequest,
     RunnerError,
     UnlockMethod,
-    _allocate_privileged_fuse_path,
     _canonicalize_bek_secret,
-    _remove_fuse_dir,
     _wait_for_file,
     mount_volume,
     unmount_volume,
@@ -193,9 +195,10 @@ def test_privileged_staging_is_private_and_empty_parents_are_removed(tmp_path: P
     session_path = tmp_path / "501" / "active_session.json"
     staging = tmp_path / "staging" / "501"
     staging.mkdir(parents=True, mode=0o755)
-    fuse_path = _allocate_privileged_fuse_path(session_path, 501)
+    fuse_path = allocate_privileged_fuse_path(session_path, 501)
     assert fuse_path.parent.stat().st_mode & 0o777 == 0o700
-    assert _remove_fuse_dir(str(fuse_path), elevated=True, session_path=session_path) == []
+    fuse_path.rmdir()
+    remove_empty_privileged_staging_parents(fuse_path, session_path)
     assert not staging.exists()
     assert not staging.parent.exists()
 

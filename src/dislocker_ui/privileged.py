@@ -253,6 +253,8 @@ def _open_root_log(path: Path, state_dir: Path, gid: int) -> TextIO:
     """Open the fixed root-created log; no user path is consulted."""
     if path.parent != state_dir:
         raise _ValidationError("root log path is outside its state directory")
+    if os.geteuid() != 0:
+        raise _ValidationError("root log must be opened by the privileged helper")
     try:
         fd = os.open(
             str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o640
@@ -260,10 +262,9 @@ def _open_root_log(path: Path, state_dir: Path, gid: int) -> TextIO:
         os.fchown(fd, 0, gid)
         os.fchmod(fd, 0o640)
         info = os.fstat(fd)
-        expected_owner = 0 if os.geteuid() == 0 else os.geteuid()
         if (
             not stat.S_ISREG(info.st_mode)
-            or info.st_uid != expected_owner
+            or info.st_uid != 0
             or stat.S_IMODE(info.st_mode) != 0o640
         ):
             raise _ValidationError("root log ownership or mode is unsafe")

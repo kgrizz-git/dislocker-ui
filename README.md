@@ -161,11 +161,10 @@ Already-root / `sudo ./run.sh` skips the osascript dialog and mounts in-process.
   (visible briefly in process listings / `ps`). Prefer a private machine and
   unmount when finished. Secrets are **not** placed in AppleScript; they travel
   briefly in a mode-0600 request file during elevation.
-- Elevation writes its mode-0600 request/log files under your
-  `Library/Application Support/dislocker-ui/` folder (a persistent, user-only
-  dir, so the privileged child can confine every path it touches). They are
-  unlinked after each operation, and any left by a killed run are swept on the
-  next Mount/Unmount.
+- Elevation writes only its mode-0600 request file under your
+  `Library/Application Support/dislocker-ui/` folder; a killed-run request is
+  swept before the next Mount/Unmount. The privileged helper derives its
+  session state and diagnostics beneath root-controlled `/var/db/dislocker-ui/`.
 - Always use **Unmount** in the app before ejecting the disk or sleeping the Mac.
 - Elevation does not harden a world-writable source tree — treat
   `sudo ./run.sh` and elevating this checkout similarly.

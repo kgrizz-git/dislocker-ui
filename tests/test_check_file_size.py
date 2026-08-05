@@ -56,6 +56,11 @@ def test_override_cap(checker: ModuleType, tmp_path: Path) -> None:
     assert checker._override_cap(path) == 900
 
 
+def test_default_source_hard_cap_is_750(checker: ModuleType) -> None:
+    """The repository-wide source hard cap remains intentionally strict."""
+    assert checker.HARD_LINE_CAP == 750
+
+
 def test_check_file_source_soft_and_hard(
     checker: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

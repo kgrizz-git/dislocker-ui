@@ -119,5 +119,73 @@ def test_privileged_dependency_rejects_writable_executable() -> None:
             return SimpleNamespace(st_mode=stat.S_IFREG | 0o775, st_uid=0)
         return SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=0)
 
-    with patch("dislocker_ui.deps.os.stat", side_effect=fake_stat):
+    with (
+        patch("dislocker_ui.deps.os.stat", side_effect=fake_stat),
+        patch("dislocker_ui.deps.os.lstat", side_effect=fake_stat),
+    ):
+        assert _is_trusted_executable(candidate) is False
+
+
+def test_privileged_dependency_accepts_root_owned_symlink_to_trusted_target() -> None:
+    """A root-owned fixed link may point to a fully root-managed executable."""
+    from dislocker_ui.deps import _is_trusted_executable
+
+    candidate = Path("/usr/local/sbin/dislocker-fuse")
+    target = Path("/opt/local/libexec/dislocker-fuse")
+
+    def fake_lstat(path: str | Path, **_kwargs):
+        if Path(path) == candidate:
+            return SimpleNamespace(st_mode=stat.S_IFLNK | 0o777, st_uid=0)
+        return SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=0)
+
+    def fake_stat(path: str | Path, **_kwargs):
+        if Path(path) == target:
+            return SimpleNamespace(st_mode=stat.S_IFREG | 0o755, st_uid=0)
+        return SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=0)
+
+    with (
+        patch("dislocker_ui.deps.os.lstat", side_effect=fake_lstat),
+        patch("dislocker_ui.deps.os.stat", side_effect=fake_stat),
+        patch.object(Path, "resolve", return_value=target),
+    ):
+        assert _is_trusted_executable(candidate) is True
+
+
+def test_privileged_dependency_rejects_symlink_target_below_unsafe_parent() -> None:
+    """A root-owned link cannot redirect root execution through an unsafe directory."""
+    from dislocker_ui.deps import _is_trusted_executable
+
+    candidate = Path("/usr/local/sbin/dislocker-fuse")
+    target = Path("/opt/local/libexec/dislocker-fuse")
+
+    def fake_lstat(path: str | Path, **_kwargs):
+        current = Path(path)
+        if current == candidate:
+            return SimpleNamespace(st_mode=stat.S_IFLNK | 0o777, st_uid=0)
+        if current == target.parent:
+            return SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=501)
+        return SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=0)
+
+    def fake_stat(path: str | Path, **_kwargs):
+        if Path(path) == target:
+            return SimpleNamespace(st_mode=stat.S_IFREG | 0o755, st_uid=0)
+        return SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_uid=0)
+
+    with (
+        patch("dislocker_ui.deps.os.lstat", side_effect=fake_lstat),
+        patch("dislocker_ui.deps.os.stat", side_effect=fake_stat),
+        patch.object(Path, "resolve", return_value=target),
+    ):
+        assert _is_trusted_executable(candidate) is False
+
+
+def test_privileged_dependency_rejects_user_owned_symlink() -> None:
+    """The fixed executable entry itself must remain root-owned."""
+    from dislocker_ui.deps import _is_trusted_executable
+
+    candidate = Path("/usr/local/sbin/dislocker-fuse")
+    with patch(
+        "dislocker_ui.deps.os.lstat",
+        return_value=SimpleNamespace(st_mode=stat.S_IFLNK | 0o777, st_uid=501),
+    ):
         assert _is_trusted_executable(candidate) is False
