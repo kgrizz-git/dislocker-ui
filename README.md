@@ -4,7 +4,7 @@ Simple macOS GUI frontend for [dislocker](https://github.com/Aorimn/dislocker).
 It does **not** fork or reimplement BitLocker crypto — it shells out to an
 installed `dislocker-fuse` and then attaches/mounts the resulting NTFS image.
 
-**Version:** see `VERSION` (currently 0.2.0).
+**Version:** see `VERSION` (currently 0.3.0).
 
 Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
@@ -19,6 +19,9 @@ On modern macOS the GUI is unprivileged; Mount/Unmount request **administrator
 privileges** (macOS password dialog) so the full pipeline can open `/dev/disk*`
 and mount under `/Volumes`. Cancel and timeout have distinct messages. Unmount
 of an elevated session asks for admin again (two prompts per cycle).
+
+Elevated GUI mounts intentionally support physical BitLocker devices
+(`/dev/diskN` or `/dev/diskNsM`) only; regular image files are out of scope.
 
 ## Requirements
 
@@ -91,6 +94,10 @@ Mount is unavailable. Uncheck Read-only when you need writes.
 Notes:
 
 - Community taps are unsupported by Homebrew.
+- The GUI's dependency check is advisory. For the elevated mount itself,
+  `dislocker-fuse` and `ntfs-3g` must be root-owned, non-group/world-writable
+  executables installed under `/usr/local/sbin` or `/opt/local/sbin`. A normal
+  user-owned Homebrew installation is deliberately not executed as root.
 - Mounts need administrator authorization (macOS dialog). Running
   `sudo ./run.sh` remains a power-user escape hatch (already-root path skips
   osascript). Elevating from a user-writable checkout is no stronger than that.

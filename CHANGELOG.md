@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.3.0] - 2026-08-05
+
+### Security
+
+- Hardened the elevated macOS mount flow: root now derives canonical session
+  state, diagnostics, and executable paths instead of accepting them from the
+  unprivileged request file.
+- Elevated GUI mounting accepts physical `/dev/diskN` and `/dev/diskNsM`
+  devices only. Regular disk-image files are no longer supported in that flow.
+- Added descriptor-safe request reads, strict request/label validation, and
+  constrained privileged cleanup. Incomplete unmounts retain state for retry.
+
+### Changed
+
+- The privileged helper runs only root-managed `dislocker-fuse` and `ntfs-3g`
+  from `/usr/local/sbin` or `/opt/local/sbin`, plus fixed macOS system tools.
+  User-owned Homebrew paths remain useful for GUI preflight but are not executed
+  as root.
+
 ## [0.2.0] - 2026-07-31
 
 ### Added

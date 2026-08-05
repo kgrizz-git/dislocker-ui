@@ -159,7 +159,7 @@ def test_overlapping_elevation_transactions_are_serialized(
                     errors.append(TimeoutError("holder did not see release signal"))
                     return
                 holder_saw_release.set()
-                if log_path.exists() and req.exists():
+                if req.exists():
                     holder_files_ok.set()
                 else:
                     errors.append(RuntimeError("holder request/log deleted while lock held"))
@@ -185,7 +185,6 @@ def test_overlapping_elevation_transactions_are_serialized(
     # Waiter must block while the holder still owns the lock.
     time.sleep(0.2)
     assert not waiter_entered.is_set()
-    assert holder_log[0].exists()
     assert (support / "dislocker-ui-req-holder.json").exists()
     release_holder.set()
     t_hold.join(timeout=5.0)
@@ -199,9 +198,7 @@ def test_overlapping_elevation_transactions_are_serialized(
     assert waiter_log
     # After the holder released, waiter's prepare may sweep the holder's temps.
     assert not (support / "dislocker-ui-req-holder.json").exists()
-    assert not holder_log[0].exists()
-    assert waiter_log[0].exists()
-    waiter_log[0].unlink(missing_ok=True)
+    assert not (support / "dislocker-ui-req-holder.json").exists()
 
 
 @pytest.mark.parametrize(
@@ -223,21 +220,18 @@ def test_classify_osascript_failure(stderr: str, exc_type: type[Exception]) -> N
     assert isinstance(err, exc_type)
 
 
-def test_validate_volume_path_accepts_disk_and_file(tmp_path: Path) -> None:
-    """/dev/disk* pattern and regular files are accepted."""
+def test_validate_volume_path_accepts_only_physical_disk() -> None:
+    """Elevated GUI mounting intentionally accepts physical disks only."""
     validate_volume_path("/dev/disk2")
     validate_volume_path("/dev/disk2s1")
-    f = tmp_path / "image.dmg"
-    f.write_bytes(b"x")
-    validate_volume_path(str(f))
     with pytest.raises(RunnerError):
-        validate_volume_path("/etc/passwd/../evil")
+        validate_volume_path("/tmp/image.dmg")
     with pytest.raises(RunnerError):
         validate_volume_path("/dev/rdisk0")
 
 
-def test_serialize_deps_resolves_paths(tmp_path: Path) -> None:
-    """Deps serialization requires all paths and resolves them."""
+def test_serialize_deps_never_exports_paths() -> None:
+    """The parent cannot select binaries for the root child."""
     # Use real existing paths from the test environment where possible.
     python = Path("/bin/sh")
     deps = DepsStatus(
@@ -248,7 +242,7 @@ def test_serialize_deps_resolves_paths(tmp_path: Path) -> None:
         ntfs3g=str(python),
     )
     out = serialize_deps(deps)
-    assert out["ntfs3g"] == str(python.resolve())
+    assert out == {}
 
 
 def test_run_elevated_mount_success_loads_session(tmp_path: Path) -> None:
@@ -339,10 +333,10 @@ def test_run_elevated_mount_cancel_unlinks_request(tmp_path: Path) -> None:
     assert not created[0].exists()
 
 
-def test_prepare_elevation_paths_creates_0600_log(
+def test_prepare_elevation_paths_returns_root_derived_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """prepare_elevation_paths returns session path and a mode-0600 log file."""
+    """The unprivileged parent does not create root session or log files."""
     from dislocker_ui.elevate import prepare_elevation_paths
 
     support = tmp_path / "Application Support" / "dislocker-ui"
@@ -358,9 +352,8 @@ def test_prepare_elevation_paths_creates_0600_log(
     with patch("dislocker_ui.elevate.assert_safe_path_for_elevation", side_effect=_safe):
         session_path, log_path = prepare_elevation_paths()
     assert session_path.name == "active_session.json"
-    assert log_path.is_file()
-    assert oct(log_path.stat().st_mode & 0o777) == "0o600"
-    log_path.unlink(missing_ok=True)
+    assert log_path.name == "operation.log"
+    assert not log_path.exists()
 
 
 def test_assert_safe_path_rejects_world_writable(tmp_path: Path) -> None:

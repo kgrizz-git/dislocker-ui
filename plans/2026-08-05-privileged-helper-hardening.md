@@ -38,6 +38,8 @@ root authority.
   macOS mount stack.
 - Treat direct `sudo ./run.sh` as a documented power-user escape hatch, not as
   a safe substitute for the elevated GUI protocol.
+- Elevated GUI mounts support physical `/dev/diskN` and `/dev/diskNsM` sources
+  only. Regular-image mounting is intentionally out of scope for this release.
 
 ## Chosen design
 
@@ -185,10 +187,11 @@ Affected modules: `runner.py`, `ntfs_mount.py`, `privileged.py`.
   untrusted field. Validate the action, UID, unlock method, boolean readonly
   value, permitted device form, secret representation, and bounded label before
   the runner is called.
-- For elevated operations, accept a physical device selector in the documented
-  `/dev/diskN` or `/dev/diskNsM` form. Decide separately whether regular-image
-  mounting remains supported; if it does, pass a safely opened, non-symlink
-  descriptor through a controlled interface instead of trusting a mutable path.
+- For elevated operations, accept only a physical device selector in the
+  documented `/dev/diskN` or `/dev/diskNsM` form. Reject regular-image paths
+  before request creation and independently in the root child. A future
+  regular-image feature requires a separately designed descriptor-safe
+  interface and macOS integration validation.
 - Restrict `volume_label` to a bounded display-name character set and reject an
   absolute path, separators, empty components, dot components, control
   characters, and overlong values. Test both slash and `..` escape attempts.
@@ -246,8 +249,8 @@ Affected modules: `tests/`, `README.md`, `SECURITY.md`, `CHANGELOG.md`,
   each former race site, canonical state permissions, rejection of payload
   session/log/dependency paths, and no-follow diagnostic reads.
 - Add root-side request-validation tests for invalid labels, non-boolean
-  readonly values, bad device forms, unsupported image paths, and dependency
-  ownership/mode failures.
+  readonly values, bad device forms, rejected regular-image paths, and
+  dependency ownership/mode failures.
 - Add runner tests proving cleanup is limited to generated roots, canonical
   session data survives failed stages, and retry resumes from recorded progress.
 - Add GUI tests for the new status and recovery messages. Run the full suite
