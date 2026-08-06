@@ -15,3 +15,10 @@ Open work only for **dislocker-ui**.
 
 - [Privileged helper hardening](plans/2026-08-05-privileged-helper-hardening.md):
   remediate the security audit findings in the elevated mount/unmount workflow.
+- [Root-managed dependency installer](plans/2026-08-05-root-deps-install.md):
+  write `scripts/install-root-deps.sh`, point the GUI "Privileged tools
+  unavailable" dialog at it, and document the one-time root install.
+  (Revised 2026-08-05 per PR-review + plan-assessment in `tmp/`: two-phase
+  unprivileged/elevated design, pinned commit SHAs, `-Dbindir`/`-DWITH_RUBY=OFF`,
+  `PKG_CONFIG_PATH` instead of `--with-fuse`/`-DFUSE_LIBRARY`, recursive
+  `otool -L` transitive-dylib gate, `/opt/local` default on both arches.)

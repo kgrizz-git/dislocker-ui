@@ -247,7 +247,8 @@ class DislockerApp(ttk.Frame):
                     "Mounting requires root-managed tools before administrator authorization.\n\n"
                     f"Missing trusted tools: {missing}\n\n"
                     "An administrator must install dislocker-fuse and ntfs-3g under "
-                    "/usr/local/sbin or /opt/local/sbin. See README.",
+                    "/usr/local/sbin or /opt/local/sbin. See README.\n\n"
+                    "One-time install: sudo scripts/install-root-deps.sh (from the repo root).",
                 )
                 return
 

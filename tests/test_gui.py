@@ -319,6 +319,7 @@ def test_on_mount_preflights_privileged_tools_before_prompt(tk_root: tk.Tk) -> N
     ):
         app.on_mount()
     assert "root-managed" in showerror.call_args.args[1]
+    assert "scripts/install-root-deps.sh" in showerror.call_args.args[1]
     mount.assert_not_called()
     assert app._busy is False
 

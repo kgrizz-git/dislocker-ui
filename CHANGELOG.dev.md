@@ -18,6 +18,61 @@ Version numbers match `VERSION` / SemVer with the public changelog.
 - Extracted privileged staging/session policy from `runner.py` and tightened
   the source-file hard cap from 800 to 750 lines.
 
+## [0.3.1] - 2026-08-05
+
+### Added
+
+- `scripts/install-root-deps.sh` and `tests/test_install_script_static.py`
+  (static, macOS-independent assertions on the installer). The installer is
+  covered by the manual macOS matrix, not unit tests (it runs as root).
+
+### Notes
+
+- Pinned upstream commit SHAs the installer builds:
+  - dislocker (`master`): `38dab03175cb5798d625375154e716665201bae1`
+  - ntfs-3g (`2026.7.7` / edge lineage):
+    `d327833ec1d5eb1358b6f2c37139f10a3460944d`
+    (not `master` tip — that branch lacks Darwin xattr `position` and fails
+    against macFUSE fuse2; matches Homebrew `ntfs-3g-mac`)
+- dislocker `master` requires the fuse3 API; macFUSE ships it (and libfuse2)
+  in `/usr/local/lib` since 4.10, so the script seeds
+  `PKG_CONFIG_PATH=/usr/local/lib/pkgconfig` and gates on
+  `pkg-config --exists fuse3`.
+- dislocker sets its own install RPATH, so the script passes no
+  `-DCMAKE_INSTALL_RPATH`. Plan: `plans/2026-08-05-root-deps-install.md`.
+- Real-hardware findings (macFUSE 5.3.3, Apple Silicon):
+  - macFUSE is a kext, not a System Extension — `systemextensionsctl` never
+    lists it. Detection uses `macfuse_installed()` (bundle dir / pkg-config),
+    not kext loadedness; kext approval is a first-mount concern.
+  - macFUSE ships libfuse into a user-owned `/usr/local/lib` even on Apple
+    Silicon, so phase 2 vendors libfuse root-owned into `$PREFIX/lib`
+    (`install_name_tool` + ad-hoc `codesign`) to keep the dyld closure
+    root-managed. Only `MFMount.framework` (root-owned under
+    `/Library/Filesystems/macfuse.fs`) is left in place.
+  - First end-to-end install failed compiling `dislocker-fuse.c` against
+    fuse3 3.18.2 (`fuse_darwin_attr` vs `struct stat`). Fixed by passing
+    `-DCMAKE_C_FLAGS=-DFUSE_DARWIN_ENABLE_EXTENSIONS=0` (macFUSE#1064;
+    same approach as nixpkgs). Static test asserts the flag.
+  - After that, stage-install failed creating `/opt/local/lib` as the
+    unprivileged user: dislocker bakes absolute `libdir`/`bindir` into
+    `install()` rules, so `cmake --install --prefix $STAGEDIR$PREFIX` does
+    not remap them. Switched to `DESTDIR=$STAGEDIR cmake --install` (same
+    as ntfs-3g; matches dislocker's own `$ENV{DESTDIR}` symlink install).
+  - ntfs-3g at master tip then failed on Darwin fuse2 xattr signatures
+    (`getxattr`/`setxattr` need `uint32_t position`). Bumped pin to
+    `2026.7.7` (`d327833…`), which has the Darwin wrappers.
+  - Build then succeeded through vendor + otool, but
+    `discover_privileged_deps().core_ok` failed missing `ntfs-3g`:
+    with `--exec-prefix` set, ntfs-3g installs via `rootbindir=$(bindir)`
+    (default `$PREFIX/bin`). Added `--bindir=$PREFIX/sbin`.
+  - First successful install still failed at mount: dyld could not load
+    `@rpath/libdislocker.0.7.dylib` because phase2's `find -type f` skipped
+    cmake's versioned dylib symlinks, and `verify_dyld_closure` ignored
+    `@rpath` / `LC_RPATH`. Added `install_staged_lib_symlinks`,
+    `sanitize_rpaths` (drop Homebrew mbedtls rpath), and tightened the
+    otool gate to require `@rpath` names under `$PREFIX/lib` and only
+    `$PREFIX/lib` as LC_RPATH.
+
 ## [0.2.0] - 2026-07-31
 
 ### Added

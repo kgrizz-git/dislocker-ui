@@ -56,6 +56,10 @@ open the `.dmg` from the Homebrew cache and run **Install macFUSE.pkg**.)
 
 ### 3. dislocker + ntfs-3g (macOS Homebrew)
 
+The Homebrew build below satisfies the **GUI preflight check** only; the
+elevated mount flow requires root-owned binaries. Run
+`scripts/install-root-deps.sh` once (section 4) to satisfy both.
+
 Homebrew core’s `dislocker` / `ntfs-3g` formulae are awkward on modern macOS
 (no bottles / FUSE disabled). Use the community macFUSE tap:
 
@@ -105,7 +109,34 @@ Notes:
   `sudo ./run.sh` remains a power-user escape hatch (already-root path skips
   osascript). Elevating from a user-writable checkout is no stronger than that.
 
-### 4. This app
+### 4. One-time root install (optional helper)
+
+The Homebrew path above is advisory only. To make the **elevated mount flow**
+trust the toolchain, run the installer once — it builds `dislocker-fuse` and
+`ntfs-3g` **from source** and installs them root-owned into `/opt/local/sbin`:
+
+```bash
+sudo scripts/install-root-deps.sh          # or: --prefix /usr/local
+```
+
+- **From source, not a copy:** a copied Homebrew binary keeps load commands
+  pointing at the user-owned Homebrew prefix, so a root-trusted binary would
+  load user-mutable dylibs. A `--prefix` build plus vendoring keeps the whole
+  dyld closure root-managed.
+- **libfuse is vendored:** macFUSE installs its libfuse into `/usr/local/lib`,
+  which is often user-owned (true even on Apple Silicon). The installer copies
+  libfuse root-owned into the install prefix and re-points the binaries, so no
+  root-trusted binary loads a library from a user-writable directory. Works on
+  both Apple Silicon and Intel.
+- **macFUSE:** if macFUSE isn't installed, the script installs the cask and
+  asks you to re-run. macFUSE's kernel extension is approved the first time you
+  actually **mount** a FUSE volume (on Apple Silicon this can require enabling
+  kernel extensions in Recovery, then a reboot) — there is no "system
+  extension" to approve in Privacy & Security beforehand.
+- This is optional; the manual Homebrew + tap path (section 3) remains valid
+  for the GUI advisory check.
+
+### 5. This app
 
 ```bash
 cd /path/to/dislocker-ui
