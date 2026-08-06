@@ -6,6 +6,13 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.4.0] - 2026-08-05
+
+### Added
+
+- `fs_probe.py` / `fat_mount.py` and `tests/test_fs_mount.py` for post-decrypt
+  FAT/ExFAT routing. Archived root-deps installer plan under `plans/archive/`.
+
 ## [Unreleased]
 
 ### Security

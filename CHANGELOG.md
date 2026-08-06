@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.4.0] - 2026-08-05
+
+### Added
+
+- BitLocker To Go volumes whose inner filesystem is **FAT32** or **ExFAT** now
+  mount after decrypt via system `mount_msdos` / `mount_exfat` (NTFS volumes
+  still use ntfs-3g).
+
 ## [0.3.1] - 2026-08-05
 
 ### Added

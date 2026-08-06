@@ -29,6 +29,3 @@ Tracked implementation plans for **dislocker-ui**.
 
 - [Privileged helper hardening](2026-08-05-privileged-helper-hardening.md):
   remediate the elevated mount/unmount security findings.
-- [Root-managed dependency installer](2026-08-05-root-deps-install.md):
-  from-source `dislocker-fuse` + `ntfs-3g` installer that satisfies the
-  privileged dependency policy, with a GUI pointer and README notes.

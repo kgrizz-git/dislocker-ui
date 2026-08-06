@@ -2,9 +2,10 @@
 
 Simple macOS GUI frontend for [dislocker](https://github.com/Aorimn/dislocker).
 It does **not** fork or reimplement BitLocker crypto — it shells out to an
-installed `dislocker-fuse` and then attaches/mounts the resulting NTFS image.
+installed `dislocker-fuse` and then attaches/mounts the resulting filesystem
+image (NTFS via ntfs-3g, or FAT/ExFAT via system mount helpers).
 
-**Version:** see `VERSION` (currently 0.3.0).
+**Version:** see `VERSION` (currently 0.4.0).
 
 Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
@@ -12,8 +13,9 @@ Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
 ## What it does
 
 1. Unlock a BitLocker volume with a user password, recovery password, or `.bek` file.
-2. Mount the decrypted NTFS image under `/Volumes` via **ntfs-3g** (read-only by default).
-3. Unmount cleanly (NTFS → detach raw disk → unmount FUSE).
+2. Mount the decrypted image under `/Volumes` (read-only by default): **ntfs-3g**
+   for NTFS, system **mount_msdos** / **mount_exfat** for BitLocker To Go FAT/ExFAT.
+3. Unmount cleanly (volume → detach raw disk → unmount FUSE).
 
 On modern macOS the GUI is unprivileged; Mount/Unmount request **administrator
 privileges** (macOS password dialog) so the full pipeline can open `/dev/disk*`
@@ -31,7 +33,7 @@ Elevated GUI mounts intentionally support physical BitLocker devices
 | Python 3.10+ with tkinter | Yes | GUI |
 | [dislocker](https://github.com/Aorimn/dislocker) | Yes | BitLocker unlock (`dislocker-fuse`) |
 | **macFUSE** | Yes | Required for dislocker + ntfs-3g options used here (`allow_other` / `local` / uid). **FUSE-T is not validated in 0.2.0.** |
-| **`ntfs-3g`** | **Yes** | RO and RW NTFS mounts (kernel `mount_ntfs` is missing on recent macOS) |
+| **`ntfs-3g`** | **Yes** (for NTFS) | RO and RW NTFS mounts (kernel `mount_ntfs` is missing on recent macOS). FAT/ExFAT BitLocker To Go uses system `mount_msdos` / `mount_exfat`. |
 
 This project does **not** bundle FUSE or ntfs-3g (system extensions / installers).
 
@@ -176,12 +178,14 @@ Already-root / `sudo ./run.sh` skips the osascript dialog and mounts in-process.
 
 | Goal | What you need |
 |------|----------------|
-| Browse files (read) | dislocker + macFUSE + **ntfs-3g** (`-o ro`) |
+| Browse files (read) | dislocker + macFUSE + **ntfs-3g** (NTFS) or **mount_msdos/exfat** (FAT/ExFAT) |
 | Edit/copy onto the volume (write) | same + uncheck Read-only |
 
 - **Dislocker** handles BitLocker. With `-r` (this app’s default) the FUSE layer
   is read-only as well.
-- **ntfs-3g** is required for both RO and RW on modern macOS (no `mount_ntfs`).
+- **After decrypt**, the app probes the attached image: **NTFS** uses
+  **ntfs-3g** (required on modern macOS; no `mount_ntfs`); **FAT/ExFAT**
+  (BitLocker To Go) uses system `mount_msdos` / `mount_exfat`.
 - Mount options include `umask=077` with `allow_other` so other local accounts
   cannot read the decrypted volume.
 

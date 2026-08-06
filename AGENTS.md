@@ -24,6 +24,8 @@ BitLocker cryptography and should not vendor dislocker sources.
 |--------|----------------|
 | `deps.py` | Locate binaries; ntfs-3g is core on Darwin |
 | `disks.py` | List candidate disk devices (`diskutil`) |
+| `fs_probe.py` | Classify decrypted image (NTFS / FAT / ExFAT) |
+| `fat_mount.py` | mount_msdos / mount_exfat for BitLocker To Go |
 | `session.py` | Persist last mount session for clean unmount |
 | `runner.py` | Mount/unmount facade (elevate or in-process) |
 | `elevate.py` | osascript admin prompt + request file protocol |
