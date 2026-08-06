@@ -27,7 +27,7 @@ import pytest
 
 from dislocker_ui.deps import DepsStatus
 from dislocker_ui.disks import DiskEntry
-from dislocker_ui.gui import DislockerApp, run_app
+from dislocker_ui.gui import DislockerApp, _raise_root_window, run_app
 from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod
 from dislocker_ui.session import MountSession
 
@@ -473,7 +473,7 @@ def test_set_busy_disables_buttons(tk_root: tk.Tk) -> None:
 
 
 def test_run_app_uses_aqua_when_available() -> None:
-    """run_app constructs the root, prefers aqua, and enters mainloop."""
+    """run_app constructs the root, prefers aqua, raises to front, and enters mainloop."""
     root = MagicMock()
     style = MagicMock()
     style.theme_names.return_value = ("aqua", "clam")
@@ -482,11 +482,13 @@ def test_run_app_uses_aqua_when_available() -> None:
         patch("dislocker_ui.gui.tk.Tk", return_value=root),
         patch("dislocker_ui.gui.ttk.Style", return_value=style),
         patch("dislocker_ui.gui.DislockerApp") as app_cls,
+        patch("dislocker_ui.gui._raise_root_window") as raise_root,
     ):
         run_app()
 
     style.theme_use.assert_called_once_with("aqua")
     app_cls.assert_called_once_with(root)
+    raise_root.assert_called_once_with(root)
     root.mainloop.assert_called_once()
 
 
@@ -498,8 +500,31 @@ def test_run_app_ignores_style_tcl_error() -> None:
         patch("dislocker_ui.gui.tk.Tk", return_value=root),
         patch("dislocker_ui.gui.ttk.Style", side_effect=tk.TclError("no display")),
         patch("dislocker_ui.gui.DislockerApp") as app_cls,
+        patch("dislocker_ui.gui._raise_root_window") as raise_root,
     ):
         run_app()
 
     app_cls.assert_called_once_with(root)
+    raise_root.assert_called_once_with(root)
     root.mainloop.assert_called_once()
+
+
+def test_raise_root_window_pulses_topmost() -> None:
+    """First-launch raise uses a temporary topmost attribute then clears it."""
+    root = MagicMock()
+    callbacks: list[tuple[int, object]] = []
+
+    def capture_after(delay: int, fn: object) -> None:
+        callbacks.append((delay, fn))
+
+    root.after.side_effect = capture_after
+    _raise_root_window(root)
+
+    root.update_idletasks.assert_called_once()
+    root.deiconify.assert_called_once()
+    root.lift.assert_called_once()
+    root.focus_force.assert_called_once()
+    root.attributes.assert_any_call("-topmost", True)
+    assert callbacks and callbacks[0][0] == 50
+    callbacks[0][1]()
+    root.attributes.assert_any_call("-topmost", False)

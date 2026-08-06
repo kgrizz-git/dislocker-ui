@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.4.1] - 2026-08-05
+
+### Fixed
+
+- Main window is raised to the front on launch so it is not hidden behind
+  Terminal (or another launcher) on macOS.
+- FAT/ExFAT mounts use `-m 700` (owner-readable mode). The previous `-m 077`
+  left owner bits clear, so Finder showed a red/empty volume after a successful
+  mount.
+
+### Changed
+
+- `run.sh` requires root (`sudo ./run.sh`). Unprivileged launches cannot open
+  removable `/dev/disk*` under macOS TCC, so a non-sudo GUI could not complete
+  a useful mount.
+
 ## [0.4.0] - 2026-08-05
 
 ### Added

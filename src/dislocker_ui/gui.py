@@ -350,6 +350,24 @@ class DislockerApp(ttk.Frame):
         threading.Thread(target=worker, daemon=True).start()
 
 
+def _raise_root_window(root: tk.Tk) -> None:
+    """Bring the main window to the front on first launch.
+
+    When started from Terminal (or another app), macOS often opens Tk behind the
+    launcher. A brief ``-topmost`` pulse plus ``lift`` / ``focus_force`` makes
+    the window visible without keeping it permanently always-on-top.
+    """
+    try:
+        root.update_idletasks()
+        root.deiconify()
+        root.lift()
+        root.attributes("-topmost", True)
+        root.after(50, lambda: root.attributes("-topmost", False))
+        root.focus_force()
+    except tk.TclError:
+        pass
+
+
 def run_app() -> None:
     """Create the Tk root and start the main loop."""
     root = tk.Tk()
@@ -361,4 +379,5 @@ def run_app() -> None:
     except tk.TclError:
         pass
     DislockerApp(root)
+    _raise_root_window(root)
     root.mainloop()

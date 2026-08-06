@@ -93,6 +93,7 @@ def test_resolve_unknown_raises() -> None:
 
 
 def test_mount_fat_invokes_mount_msdos(tmp_path: Path) -> None:
+    """_mount_fat invokes mount_msdos with uid/gid and owner-only mode 700."""
     req = MountRequest(
         volume="/dev/disk2s1",
         method=UnlockMethod.USER_PASSWORD,
@@ -108,9 +109,46 @@ def test_mount_fat_invokes_mount_msdos(tmp_path: Path) -> None:
     assert used is False
     cmd = run.call_args.args[0]
     assert cmd[0] == "/sbin/mount_msdos"
-    assert cmd[1:7] == ["-u", "501", "-g", "20", "-m", "077"]
+    assert cmd[1:7] == ["-u", "501", "-g", "20", "-m", "700"]
     assert cmd[7:9] == ["-o", "rdonly"]
     assert cmd[9:] == ["/dev/disk999", str(mountpoint)]
+
+
+def test_mount_decrypted_volume_routes_fat() -> None:
+    """Runner probes the attached image and dispatches to mount_fat for msdos."""
+    from dislocker_ui.deps import DepsStatus
+    from dislocker_ui.runner import _mount_decrypted_volume
+
+    deps = DepsStatus(
+        dislocker_fuse="/bin/dislocker-fuse",
+        hdiutil="/bin/hdiutil",
+        diskutil="/bin/diskutil",
+        umount="/bin/umount",
+        ntfs3g="/bin/ntfs-3g",
+    )
+    req = MountRequest(
+        volume="/dev/disk2s1",
+        method=UnlockMethod.USER_PASSWORD,
+        secret="secret",
+        readonly=True,
+        volume_label="CMR",
+    )
+    logs: list[str] = []
+    with (
+        patch(
+            "dislocker_ui.runner.resolve_mount_filesystem",
+            return_value=("/dev/disk4", "msdos"),
+        ),
+        patch("dislocker_ui.runner._mount_fat", return_value=False) as fat,
+        patch("dislocker_ui.runner._mount_ntfs") as ntfs,
+    ):
+        used = _mount_decrypted_volume(
+            deps, req, "/dev/disk4", Path("/Volumes/CMR"), logs.append, uid=501, gid=20
+        )
+    assert used is False
+    fat.assert_called_once()
+    ntfs.assert_not_called()
+    assert any("msdos" in line for line in logs)
 
 
 def test_mount_fat_exfat_rw_omits_rdonly(tmp_path: Path) -> None:

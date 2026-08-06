@@ -6,6 +6,20 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.4.1] - 2026-08-05
+
+### Fixed
+
+- GUI `_raise_root_window` pulses `-topmost` on first launch; covered in
+  `test_gui.py`.
+- FAT/ExFAT `-m 700` (not `077`); `test_fs_mount` asserts the mode. `077` is a
+  permission *mode* on `mount_msdos`, not a umask — owner had no access.
+
+### Changed
+
+- `run.sh` exits non-zero unless `id -u` is 0; static test covers the guard.
+  README / AGENTS document `sudo ./run.sh` as the supported launcher.
+
 ## [0.4.0] - 2026-08-05
 
 ### Added

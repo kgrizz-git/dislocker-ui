@@ -17,10 +17,10 @@ Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
    for NTFS, system **mount_msdos** / **mount_exfat** for BitLocker To Go FAT/ExFAT.
 3. Unmount cleanly (volume → detach raw disk → unmount FUSE).
 
-On modern macOS the GUI is unprivileged; Mount/Unmount request **administrator
-privileges** (macOS password dialog) so the full pipeline can open `/dev/disk*`
-and mount under `/Volumes`. Cancel and timeout have distinct messages. Unmount
-of an elevated session asks for admin again (two prompts per cycle).
+On modern macOS, launch with **`sudo ./run.sh`**. The GUI then runs already-root
+and mounts in-process (no osascript administrator dialog). An unprivileged
+GUI cannot open removable `/dev/disk*` under TCC, so non-sudo launches cannot
+complete a useful mount.
 
 Elevated GUI mounts intentionally support physical BitLocker devices
 (`/dev/diskN` or `/dev/diskNsM`) only; regular image files are out of scope.
@@ -150,29 +150,25 @@ No Python packages beyond the stdlib (tkinter) are required.
 ## Usage
 
 1. Plug in / attach the BitLocker disk.
-2. Launch the UI:
+2. Launch the UI **with sudo** (required so mounts can open removable
+   `/dev/disk*` under macOS TCC; an unprivileged GUI cannot complete a useful
+   mount):
 
 ```bash
 cd /path/to/dislocker-ui
-./run.sh
+sudo ./run.sh
 ```
 
-Or:
-
-```bash
-cd /path/to/dislocker-ui
-PYTHONPATH=src python3 -m dislocker_ui
-```
+`SUDO_UID` / `SUDO_GID` are preserved so mounted files are owned by your user,
+not root. Running `python3 -m dislocker_ui` without sudo is unsupported for
+real mounts.
 
 3. Select a volume (or type `/dev/diskXsY`).
 4. Choose unlock method: user password, recovery password, or `.bek` file.
-5. Leave **Read-only** checked unless you need writes (ntfs-3g required either way).
-6. Click **Mount**, complete the macOS administrator prompt, then open the path
-   under `/Volumes` (shown in the dialog / status line).
-7. When finished, click **Unmount** (second admin prompt if the session was
-   elevated) before ejecting the disk or shutting down.
-
-Already-root / `sudo ./run.sh` skips the osascript dialog and mounts in-process.
+5. Leave **Read-only** checked unless you need writes.
+6. Click **Mount**, then open the path under `/Volumes` (shown in the dialog /
+   status line).
+7. When finished, click **Unmount** before ejecting the disk or shutting down.
 
 ## Read vs write
 
@@ -186,8 +182,8 @@ Already-root / `sudo ./run.sh` skips the osascript dialog and mounts in-process.
 - **After decrypt**, the app probes the attached image: **NTFS** uses
   **ntfs-3g** (required on modern macOS; no `mount_ntfs`); **FAT/ExFAT**
   (BitLocker To Go) uses system `mount_msdos` / `mount_exfat`.
-- Mount options include `umask=077` with `allow_other` so other local accounts
-  cannot read the decrypted volume.
+- NTFS mounts use `umask=077` with `allow_other`. FAT/ExFAT mounts use
+  `-u/-g` from `SUDO_UID`/`SUDO_GID` and `-m 700` (owner-only mode bits).
 
 ## Safety notes
 
@@ -200,9 +196,10 @@ Already-root / `sudo ./run.sh` skips the osascript dialog and mounts in-process.
   `Library/Application Support/dislocker-ui/` folder; a killed-run request is
   swept before the next Mount/Unmount. The privileged helper derives its
   session state and diagnostics beneath root-controlled `/var/db/dislocker-ui/`.
+  Prefer `sudo ./run.sh` so the GUI is already root and skips that path.
 - Always use **Unmount** in the app before ejecting the disk or sleeping the Mac.
-- Elevation does not harden a world-writable source tree — treat
-  `sudo ./run.sh` and elevating this checkout similarly.
+- Running the GUI as root does not harden a world-writable source tree — keep
+  the checkout private.
 
 ## Layout
 

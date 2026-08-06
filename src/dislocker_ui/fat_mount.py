@@ -51,6 +51,9 @@ def mount_fat(
 
     *kind* must be ``msdos`` or ``exfat``. Always returns False (ntfs-3g not
     used) so callers can store it on ``MountSession.used_ntfs3g``.
+
+    ``-m 700`` is a *permission mode* (chmod-style), not a umask: ``077`` would
+    leave the owner with no bits and Finder shows a red/empty volume.
     """
     from dislocker_ui.runner import _run
 
@@ -61,7 +64,8 @@ def mount_fat(
     log(f"Mounting {label} {mode} via {helper} at {mountpoint}…")
     mountpoint.mkdir(parents=True, exist_ok=True)
 
-    cmd = [helper, "-u", str(owner_uid), "-g", str(owner_gid), "-m", "077"]
+    # -m is max permission bits (like 700), NOT umask (ntfs-3g's umask=077).
+    cmd = [helper, "-u", str(owner_uid), "-g", str(owner_gid), "-m", "700"]
     if req.readonly:
         cmd.extend(["-o", "rdonly"])
     cmd.extend([raw_disk, str(mountpoint)])
