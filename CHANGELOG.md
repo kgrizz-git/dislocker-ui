@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.4.3] - 2026-08-06
+
+### Changed
+
+- Core dependency check no longer requires `ntfs-3g`. FAT/ExFAT BitLocker To Go
+  volumes can mount with only `dislocker-fuse` + system mount helpers; NTFS still
+  needs `ntfs-3g` and fails with a clear error when it is missing.
+- `run.sh` documents the checkout-as-root ownership model and refuses
+  group-/world-writable launcher/`src` paths before `exec`.
+
+### Fixed
+
+- Installer: explicit `--prefix` wins over a `PREFIX` env default; empty dyld
+  target lists are guarded under bash 3.2 `set -u`; manifest re-check messaging
+  no longer claims a full TOCTOU close.
+
 ## [0.4.2] - 2026-08-06
 
 ### Fixed

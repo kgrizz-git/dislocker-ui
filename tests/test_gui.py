@@ -169,11 +169,13 @@ def test_init_shows_core_ok_and_no_session(tk_root: tk.Tk) -> None:
 
 
 def test_rw_hint_when_ntfs3g_missing(tk_root: tk.Tk) -> None:
-    """Without ntfs-3g, hint says mounts are unavailable (not RO-only)."""
+    """Without ntfs-3g, FAT/ExFAT still mount; RW stays enabled with a note."""
     app = _build_app(tk_root, deps=_core_deps(ntfs3g=None))
-    assert "unavailable" in app.rw_hint.cget("text")
-    assert "only read-only" not in app.rw_hint.cget("text")
-    assert str(app.readonly_check.cget("state")) == str(tk.DISABLED)
+    text = app.rw_hint.cget("text")
+    assert "ntfs-3g missing" in text
+    assert "FAT/ExFAT" in text
+    assert "unavailable" not in text or "NTFS unavailable" in text
+    assert str(app.readonly_check.cget("state")) == str(tk.NORMAL)
 
 
 def test_init_missing_deps_label(tk_root: tk.Tk) -> None:
@@ -206,9 +208,10 @@ def test_init_reads_the_canonical_active_session_path(tk_root: tk.Tk) -> None:
 
 
 def test_rw_available_when_ntfs3g_present(tk_root: tk.Tk) -> None:
-    """ntfs-3g unlocks the writable mount option and hint text."""
+    """With ntfs-3g, core banner and writable hint are shown; RW is enabled."""
     app = _build_app(tk_root, deps=_core_deps(ntfs3g="/bin/ntfs-3g"))
     assert "Core tools OK" in app.deps_label.cget("text")
+    assert "ntfs-3g present" in app.deps_label.cget("text")
     assert "writable" in app.rw_hint.cget("text")
     assert str(app.readonly_check.cget("state")) == str(tk.NORMAL)
 
@@ -291,7 +294,7 @@ def test_recheck_deps_refreshes_label(tk_root: tk.Tk) -> None:
     ):
         app._recheck_deps()
     assert "Core tools OK" in app.deps_label.cget("text")
-    assert "ntfs-3g required" in app.deps_label.cget("text")
+    assert "ntfs-3g present" in app.deps_label.cget("text")
     assert "Dependency check refreshed" in app.log_text.get("1.0", tk.END)
 
 

@@ -5,7 +5,7 @@ It does **not** fork or reimplement BitLocker crypto — it shells out to an
 installed `dislocker-fuse` and then attaches/mounts the resulting filesystem
 image (NTFS via ntfs-3g, or FAT/ExFAT via system mount helpers).
 
-**Version:** see `VERSION` (currently 0.4.0).
+**Version:** see `VERSION` (currently 0.4.3).
 
 Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
@@ -21,6 +21,10 @@ On modern macOS, launch with **`sudo ./run.sh`**. The GUI then runs already-root
 and mounts in-process (no osascript administrator dialog). An unprivileged
 GUI cannot open removable `/dev/disk*` under TCC, so non-sudo launches cannot
 complete a useful mount.
+
+`run.sh` executes the **checkout** as root (`PYTHONPATH=…/src`). Keep the repo
+owned by you and not group-/world-writable; do not `sudo` a shared or untrusted
+tree. A separate root-owned app package is out of scope for this personal helper.
 
 Elevated GUI mounts intentionally support physical BitLocker devices
 (`/dev/diskN` or `/dev/diskNsM`) only; regular image files are out of scope.

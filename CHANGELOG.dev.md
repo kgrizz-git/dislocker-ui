@@ -6,6 +6,20 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.4.3] - 2026-08-06
+
+### Changed
+
+- `DepsStatus.core_ok` omits `ntfs-3g`; GUI hints and runner probe-time NTFS
+  gate updated. CodeRabbit follow-ups: README version sync, archived plan
+  paths, PREFIX flag precedence, dyld empty-array guard, Darwin-guard test
+  anchoring, generic `fat` Content hint, docstring coverage on touched tests.
+
+### Fixed
+
+- Installer phase-2 messaging clarifies manifest re-hash limits; post-install
+  assert requires both `dislocker_fuse` and `ntfs3g` explicitly.
+
 ## [0.4.2] - 2026-08-06
 
 ### Fixed
@@ -69,7 +83,7 @@ Version numbers match `VERSION` / SemVer with the public changelog.
   `PKG_CONFIG_PATH=/usr/local/lib/pkgconfig` and gates on
   `pkg-config --exists fuse3`.
 - dislocker sets its own install RPATH, so the script passes no
-  `-DCMAKE_INSTALL_RPATH`. Plan: `plans/2026-08-05-root-deps-install.md`.
+  `-DCMAKE_INSTALL_RPATH`. Plan: `plans/archive/2026-08-05-root-deps-install.md`.
 - Real-hardware findings (macFUSE 5.3.3, Apple Silicon):
   - macFUSE is a kext, not a System Extension — `systemextensionsctl` never
     lists it. Detection uses `macfuse_installed()` (bundle dir / pkg-config),

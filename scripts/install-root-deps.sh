@@ -14,7 +14,7 @@
 #   A copied Homebrew binary keeps @rpath/@loader_path load commands pointing
 #   at the user-owned Homebrew prefix; a root-trusted binary must not load
 #   user-mutable dylibs. A --prefix build colocates the binaries with a
-#   root-managed dyld closure. See plans/2026-08-05-root-deps-install.md.
+#   root-managed dyld closure. See plans/archive/2026-08-05-root-deps-install.md.
 #
 # Privilege model:
 #   macOS only. Invoked as `sudo scripts/install-root-deps.sh`. The process
@@ -127,7 +127,8 @@ phase0() {
     die "Must be invoked via sudo (SUDO_UID/SUDO_USER unset)."
   fi
 
-  local prefix="$PREFIX_DEFAULT" assume_yes="no"
+  # Env PREFIX is the default only; an explicit --prefix flag wins.
+  local prefix="${PREFIX:-$PREFIX_DEFAULT}" assume_yes="no"
   while [ $# -gt 0 ]; do
     case "$1" in
       --prefix) prefix="${2:-}"; shift 2 ;;
@@ -137,7 +138,6 @@ phase0() {
       *) die "Unknown argument: $1 (see --help)" ;;
     esac
   done
-  [ -n "${PREFIX:-}" ] && prefix="$PREFIX"   # PREFIX=... env override
 
   # Validate prefix against the two accepted roots only (binaries must end up
   # in /opt/local/sbin or /usr/local/sbin to satisfy the trust policy).
@@ -372,7 +372,11 @@ build_ntfs3g() {
 phase2() {
   local prefix="$1" sbindir="$2" stagedir="$3" manifest="$4"
 
-  info "Verifying staged files against manifest (TOCTOU guard)"
+  # Re-hash catches incomplete/partial staging or changes by another user.
+  # It does NOT stop the same unprivileged user rewriting stage+manifest as a
+  # consistent pair before phase 2 copies; phase 2 still only installs
+  # sbin/ + lib/ under the allow-listed prefix and then runs the dyld trust gate.
+  info "Re-checking staged file hashes before root install"
   verify_manifest "$stagedir" "$manifest" || die "Staged file hash mismatch; refusing to install."
 
   # Record of files THIS run installs, so failure cleanup never touches
@@ -432,10 +436,12 @@ phase2() {
 
   info "Running the privileged-policy functional check"
   local root; root="$(cd "$(dirname "$0")/.." && pwd)"
+  # Installer always ships both tools; assert them explicitly (core_ok no longer
+  # requires ntfs-3g so FAT-only hosts can mount without it).
   if ! PYTHONPATH="$root/src" python3 -c \
-      'from dislocker_ui.deps import discover_privileged_deps as d; s=d(); assert s.core_ok, s.missing_core(); print(s)'; then
+      'from dislocker_ui.deps import discover_privileged_deps as d; s=d(); assert s.dislocker_fuse and s.ntfs3g, s.missing_core(); print(s)'; then
     cleanup_failed "$installed_list"
-    die "discover_privileged_deps().core_ok is False after install."
+    die "discover_privileged_deps() missing dislocker-fuse or ntfs-3g after install."
   fi
 
   rm -f "$installed_list"
@@ -583,6 +589,11 @@ verify_dyld_closure() {
     find "$sbindir" -type f -perm -u+x 2>/dev/null
     find "$prefix/lib" -type f -name '*.dylib' 2>/dev/null
   )
+  # Bash 3.2 + set -u: empty "${targets[@]}" is an unbound-variable error.
+  if [ ${#targets[@]} -eq 0 ]; then
+    warn "no executables/dylibs found under $sbindir and $prefix/lib"
+    return 1
+  fi
   local t line dep name path
   for t in "${targets[@]}"; do
     while IFS= read -r line; do

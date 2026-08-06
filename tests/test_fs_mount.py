@@ -23,10 +23,12 @@ from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod
 
 
 def _plist(data: dict) -> bytes:
+    """Serialize *data* to a plist bytes blob for mocked diskutil output."""
     return plistlib.dumps(data)
 
 
 def test_classify_device_fat32() -> None:
+    """Classify msdos when diskutil reports MS-DOS FAT32."""
     info = {
         "FilesystemType": "msdos",
         "FilesystemName": "MS-DOS FAT32",
@@ -36,13 +38,22 @@ def test_classify_device_fat32() -> None:
         assert classify_device("/usr/sbin/diskutil", "/dev/disk4") == "msdos"
 
 
+def test_classify_device_windows_fat_content() -> None:
+    """Classify msdos from Content=Windows_FAT_32 (generic fat hint)."""
+    info = {"Content": "Windows_FAT_32"}
+    with patch("dislocker_ui.fs_probe._diskutil_info", return_value=info):
+        assert classify_device("/usr/sbin/diskutil", "/dev/disk4") == "msdos"
+
+
 def test_classify_device_ntfs() -> None:
+    """Classify ntfs when diskutil reports an NTFS filesystem."""
     info = {"FilesystemType": "ntfs", "FilesystemName": "NTFS"}
     with patch("dislocker_ui.fs_probe._diskutil_info", return_value=info):
         assert classify_device("/usr/sbin/diskutil", "/dev/disk4") == "ntfs"
 
 
 def test_classify_device_exfat() -> None:
+    """Classify exfat when diskutil reports ExFAT."""
     info = {"FilesystemName": "ExFAT", "FilesystemType": "exfat"}
     with patch("dislocker_ui.fs_probe._diskutil_info", return_value=info):
         assert classify_device("/usr/sbin/diskutil", "/dev/disk4") == "exfat"
@@ -52,6 +63,7 @@ def test_resolve_falls_back_to_partition() -> None:
     """Whole-disk node with no FS → use first classified partition."""
 
     def fake_info(_diskutil: str, device: str) -> dict:
+        """Return mocked diskutil info keyed by device path."""
         if device == "/dev/disk4":
             return {}
         if device == "/dev/disk4s1":
@@ -81,6 +93,7 @@ def test_resolve_falls_back_to_partition() -> None:
 
 
 def test_resolve_unknown_raises() -> None:
+    """Raise when neither the whole disk nor partitions classify."""
     with (
         patch("dislocker_ui.fs_probe._diskutil_info", return_value={}),
         patch(
@@ -152,6 +165,7 @@ def test_mount_decrypted_volume_routes_fat() -> None:
 
 
 def test_mount_fat_exfat_rw_omits_rdonly(tmp_path: Path) -> None:
+    """ExFAT read/write mounts omit the rdonly option."""
     req = MountRequest(
         volume="/dev/disk2s1",
         method=UnlockMethod.USER_PASSWORD,
@@ -168,7 +182,39 @@ def test_mount_fat_exfat_rw_omits_rdonly(tmp_path: Path) -> None:
     assert "rdonly" not in cmd
 
 
+def test_mount_ntfs_without_ntfs3g_raises() -> None:
+    """NTFS routing fails clearly when ntfs-3g is absent."""
+    from dislocker_ui.deps import DepsStatus
+    from dislocker_ui.runner import _mount_decrypted_volume
+
+    deps = DepsStatus(
+        dislocker_fuse="/bin/dislocker-fuse",
+        hdiutil="/bin/hdiutil",
+        diskutil="/bin/diskutil",
+        umount="/bin/umount",
+        ntfs3g=None,
+    )
+    req = MountRequest(
+        volume="/dev/disk2s1",
+        method=UnlockMethod.USER_PASSWORD,
+        secret="secret",
+        readonly=True,
+        volume_label="WIN",
+    )
+    with (
+        patch(
+            "dislocker_ui.runner.resolve_mount_filesystem",
+            return_value=("/dev/disk4", "ntfs"),
+        ),
+        pytest.raises(RunnerError, match="requires ntfs-3g"),
+    ):
+        _mount_decrypted_volume(
+            deps, req, "/dev/disk4", Path("/Volumes/WIN"), lambda _m: None, uid=501, gid=20
+        )
+
+
 def test_mount_fat_rejects_unknown_kind(tmp_path: Path) -> None:
+    """Reject unsupported filesystem kinds before invoking mount helpers."""
     req = MountRequest(
         volume="/dev/disk2s1",
         method=UnlockMethod.USER_PASSWORD,
@@ -181,6 +227,7 @@ def test_mount_fat_rejects_unknown_kind(tmp_path: Path) -> None:
 
 
 def test_mount_fat_rejects_non_physical_disk(tmp_path: Path) -> None:
+    """Reject disk paths that are not physical /dev/diskN[sM] selectors."""
     req = MountRequest(
         volume="/dev/disk2s1",
         method=UnlockMethod.USER_PASSWORD,
@@ -201,6 +248,7 @@ def test_mount_fat_rejects_non_physical_disk(tmp_path: Path) -> None:
 
 
 def test_mount_fat_rejects_unsafe_mountpoint() -> None:
+    """Reject mountpoints with shell-metacharacter path segments."""
     req = MountRequest(
         volume="/dev/disk2s1",
         method=UnlockMethod.USER_PASSWORD,

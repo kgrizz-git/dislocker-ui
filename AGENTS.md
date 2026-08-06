@@ -22,7 +22,7 @@ BitLocker cryptography and should not vendor dislocker sources.
 
 | Module | Responsibility |
 |--------|----------------|
-| `deps.py` | Locate binaries; ntfs-3g is core on Darwin |
+| `deps.py` | Locate binaries; ntfs-3g required for NTFS only (FAT/ExFAT use system helpers) |
 | `disks.py` | List candidate disk devices (`diskutil`) |
 | `fs_probe.py` | Classify decrypted image (NTFS / FAT / ExFAT) |
 | `fat_mount.py` | mount_msdos / mount_exfat for BitLocker To Go |

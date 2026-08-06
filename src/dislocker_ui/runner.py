@@ -400,6 +400,11 @@ def _mount_decrypted_volume(
     else:
         log(f"Detected {kind} on {device}")
     if kind == "ntfs":
+        if not deps.ntfs3g:
+            raise RunnerError(
+                "NTFS volume requires ntfs-3g (not found). "
+                "FAT/ExFAT BitLocker To Go volumes do not need it."
+            )
         return _mount_ntfs(deps, req, device, mountpoint, log, uid=uid, gid=gid)
     return _mount_fat(req, device, mountpoint, log, kind=kind, uid=uid, gid=gid)
 
@@ -620,11 +625,13 @@ def _best_effort_cleanup(
 
 
 def _validate_volume_label(label: str) -> None:
+    """Reject volume labels that are unsafe as /Volumes children."""
     if not is_safe_volume_label(label):
         raise RunnerError("Volume label must be a short filesystem-safe display name")
 
 
 def _validate_elevated_request(req: MountRequest) -> None:
+    """Reject elevated mount requests that fail the shared mount policy."""
     error = elevated_request_error(req.volume, req.readonly, req.volume_label)
     if error:
         raise RunnerError(error)

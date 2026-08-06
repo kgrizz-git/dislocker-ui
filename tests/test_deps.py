@@ -21,8 +21,8 @@ import pytest
 from dislocker_ui.deps import DepsStatus, discover_deps
 
 
-def test_core_ok_requires_ntfs3g() -> None:
-    """core_ok is false when ntfs-3g is missing even if other tools exist."""
+def test_core_ok_without_ntfs3g() -> None:
+    """core_ok is true without ntfs-3g so FAT/ExFAT mounts can proceed."""
     status = DepsStatus(
         dislocker_fuse="/opt/homebrew/bin/dislocker-fuse",
         hdiutil="/usr/bin/hdiutil",
@@ -30,9 +30,10 @@ def test_core_ok_requires_ntfs3g() -> None:
         umount="/sbin/umount",
         ntfs3g=None,
     )
-    assert status.core_ok is False
-    assert status.can_write is False
-    assert status.missing_core() == ["ntfs-3g"]
+    assert status.core_ok is True
+    assert status.can_write is True
+    assert status.has_ntfs3g is False
+    assert status.missing_core() == []
 
 
 def test_core_ok_and_missing_core() -> None:
@@ -45,12 +46,13 @@ def test_core_ok_and_missing_core() -> None:
         ntfs3g="/opt/homebrew/bin/ntfs-3g",
     )
     assert status.core_ok is False
-    assert status.can_write is True
+    assert status.can_write is False
+    assert status.has_ntfs3g is True
     assert status.missing_core() == ["diskutil"]
 
 
-def test_can_write_when_ntfs3g_present() -> None:
-    """can_write is true only when ntfs-3g was found."""
+def test_can_write_when_core_ok() -> None:
+    """can_write follows core_ok (FAT RW); NTFS still needs has_ntfs3g later."""
     status = DepsStatus(
         dislocker_fuse="x",
         hdiutil="x",
@@ -60,6 +62,7 @@ def test_can_write_when_ntfs3g_present() -> None:
     )
     assert status.core_ok is True
     assert status.can_write is True
+    assert status.has_ntfs3g is True
 
 
 def test_discover_deps_uses_which(monkeypatch: pytest.MonkeyPatch) -> None:

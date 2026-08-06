@@ -29,7 +29,9 @@ _KIND_MSDOS = "msdos"
 _KIND_EXFAT = "exfat"
 
 _NTFS_HINTS = ("ntfs",)
-_MSDOS_HINTS = ("msdos", "fat32", "fat16", "fat12", "ms-dos", "dos_fat")
+# Generic "fat" matches Content values like Windows_FAT_32 / DOS_FAT_16.
+# Checked after ExFAT hints so bare "exfat" is not mis-classified as MS-DOS.
+_MSDOS_HINTS = ("msdos", "ms-dos", "fat")
 _EXFAT_HINTS = ("exfat",)
 _WHOLE_DISK_RE = re.compile(r"/dev/(disk\d+)(?:s\d+)?")
 
