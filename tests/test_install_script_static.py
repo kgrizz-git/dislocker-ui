@@ -68,7 +68,8 @@ def test_no_machine_specific_home_path() -> None:
 
 def test_non_darwin_guard_exits_nonzero() -> None:
     body = _text()
-    assert "uname -s" in body and "Darwin" in body
+    assert "uname -s" in body
+    assert "Darwin" in body
     # The guard must die() (non-zero exit) rather than warn.
     assert re.search(r"uname -s.*Darwin.*\|\|\s*die", body, re.DOTALL)
 

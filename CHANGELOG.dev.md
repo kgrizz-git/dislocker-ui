@@ -6,7 +6,16 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.4.2] - 2026-08-06
+
+### Fixed
+
+- Sonar PR gate: sanitize FAT mount argv (pythonsecurity:S8705); reduce
+  `fs_probe._partition_devices` cognitive complexity; split composite pytest
+  asserts in `test_gui` / `test_install_script_static`.
+
 ## [0.4.1] - 2026-08-05
+
 
 ### Fixed
 

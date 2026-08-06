@@ -525,6 +525,7 @@ def test_raise_root_window_pulses_topmost() -> None:
     root.lift.assert_called_once()
     root.focus_force.assert_called_once()
     root.attributes.assert_any_call("-topmost", True)
-    assert callbacks and callbacks[0][0] == 50
+    assert callbacks
+    assert callbacks[0][0] == 50
     callbacks[0][1]()
     root.attributes.assert_any_call("-topmost", False)

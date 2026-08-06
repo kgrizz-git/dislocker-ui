@@ -31,6 +31,7 @@ _KIND_EXFAT = "exfat"
 _NTFS_HINTS = ("ntfs",)
 _MSDOS_HINTS = ("msdos", "fat32", "fat16", "fat12", "ms-dos", "dos_fat")
 _EXFAT_HINTS = ("exfat",)
+_WHOLE_DISK_RE = re.compile(r"/dev/(disk\d+)(?:s\d+)?")
 
 
 def resolve_mount_filesystem(diskutil: str, raw_disk: str) -> tuple[str, str]:
@@ -64,8 +65,28 @@ def classify_device(diskutil: str, device: str) -> str | None:
 
 def _diskutil_info(diskutil: str, device: str) -> dict[str, Any]:
     """Parse ``diskutil info -plist`` for *device*; empty dict on failure."""
+    return _diskutil_plist(diskutil, "info", device)
+
+
+def _partition_devices(diskutil: str, raw_disk: str) -> list[str]:
+    """Return ``/dev/diskNsM`` children of the whole disk behind *raw_disk*."""
+    whole = _whole_disk_identifier(raw_disk)
+    if whole is None:
+        return []
+    data = _diskutil_plist(diskutil, "list", f"/dev/{whole}")
+    return _slice_paths_for_whole(data, whole)
+
+
+def _whole_disk_identifier(raw_disk: str) -> str | None:
+    """Extract ``diskN`` from a ``/dev/diskN`` or ``/dev/diskNsM`` path."""
+    match = _WHOLE_DISK_RE.fullmatch(raw_disk)
+    return match.group(1) if match else None
+
+
+def _diskutil_plist(diskutil: str, subcmd: str, device: str) -> dict[str, Any]:
+    """Run ``diskutil <subcmd> -plist <device>`` and return a dict (or {})."""
     proc = subprocess.run(
-        [diskutil, "info", "-plist", device],
+        [diskutil, subcmd, "-plist", device],
         check=False,
         capture_output=True,
     )
@@ -78,38 +99,27 @@ def _diskutil_info(diskutil: str, device: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _partition_devices(diskutil: str, raw_disk: str) -> list[str]:
-    """Return ``/dev/diskNsM`` children of the whole disk behind *raw_disk*."""
-    match = re.fullmatch(r"/dev/(disk\d+)(?:s\d+)?", raw_disk)
-    if not match:
-        return []
-    whole = match.group(1)
-    proc = subprocess.run(
-        [diskutil, "list", "-plist", f"/dev/{whole}"],
-        check=False,
-        capture_output=True,
-    )
-    if proc.returncode != 0 or not proc.stdout:
-        return []
-    try:
-        data = plistlib.loads(proc.stdout)
-    except plistlib.InvalidFileException:
-        return []
-    if not isinstance(data, dict):
-        return []
+def _slice_paths_for_whole(data: dict[str, Any], whole: str) -> list[str]:
+    """Collect ``/dev/…`` paths for partitions of *whole* from a list plist."""
     out: list[str] = []
     for disk in data.get("AllDisksAndPartitions", []) or []:
-        if not isinstance(disk, dict):
-            continue
-        if disk.get("DeviceIdentifier") != whole:
-            continue
-        for part in disk.get("Partitions", []) or []:
-            if not isinstance(part, dict):
-                continue
-            part_id = part.get("DeviceIdentifier")
-            if isinstance(part_id, str) and part_id:
-                out.append(f"/dev/{part_id}")
+        for part_id in _partition_ids_from_disk_entry(disk, whole):
+            out.append(f"/dev/{part_id}")
     return out
+
+
+def _partition_ids_from_disk_entry(disk: object, whole: str) -> list[str]:
+    """Return DeviceIdentifier strings for partitions of *whole* on *disk*."""
+    if not isinstance(disk, dict) or disk.get("DeviceIdentifier") != whole:
+        return []
+    ids: list[str] = []
+    for part in disk.get("Partitions", []) or []:
+        if not isinstance(part, dict):
+            continue
+        part_id = part.get("DeviceIdentifier")
+        if isinstance(part_id, str) and part_id:
+            ids.append(part_id)
+    return ids
 
 
 def _classify_info(info: dict[str, Any]) -> str | None:

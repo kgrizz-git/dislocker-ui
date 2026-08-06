@@ -178,3 +178,43 @@ def test_mount_fat_rejects_unknown_kind(tmp_path: Path) -> None:
     )
     with pytest.raises(RunnerError, match="Unsupported"):
         mount_fat(req, "/dev/disk1", tmp_path / "m", lambda _m: None, kind="zfs")
+
+
+def test_mount_fat_rejects_non_physical_disk(tmp_path: Path) -> None:
+    req = MountRequest(
+        volume="/dev/disk2s1",
+        method=UnlockMethod.USER_PASSWORD,
+        secret="x",
+        readonly=True,
+        volume_label="Y",
+    )
+    with pytest.raises(RunnerError, match="non-physical"):
+        mount_fat(
+            req,
+            "/dev/disk4; rm -rf /",
+            tmp_path / "m",
+            lambda _m: None,
+            kind="msdos",
+            uid=501,
+            gid=20,
+        )
+
+
+def test_mount_fat_rejects_unsafe_mountpoint() -> None:
+    req = MountRequest(
+        volume="/dev/disk2s1",
+        method=UnlockMethod.USER_PASSWORD,
+        secret="x",
+        readonly=True,
+        volume_label="Y",
+    )
+    with pytest.raises(RunnerError, match="unsafe characters"):
+        mount_fat(
+            req,
+            "/dev/disk1",
+            Path("/Volumes/bad;id"),
+            lambda _m: None,
+            kind="msdos",
+            uid=501,
+            gid=20,
+        )

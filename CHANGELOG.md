@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.4.2] - 2026-08-06
+
+### Fixed
+
+- FAT/ExFAT mount argv is validated before `subprocess` (physical `/dev/disk*`
+  only, safe absolute mountpoints, bounded uid/gid) so untrusted request fields
+  cannot reach OS commands.
+
 ## [0.4.1] - 2026-08-05
+
 
 ### Fixed
 
