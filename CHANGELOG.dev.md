@@ -6,6 +6,61 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.4.4] - 2026-08-06
+
+### Changed
+
+- `DepsStatus.can_write` requires `has_ntfs3g`; GUI RW hint forces RO when
+  ntfs-3g is missing while `core_ok` still allows FAT/ExFAT RO mounts.
+
+### Fixed
+
+- `run.sh` group/world-writable gate uses `stat -f '%OLp'` (BSD/macOS).
+
+## [0.4.3] - 2026-08-06
+
+### Changed
+
+- `DepsStatus.core_ok` omits `ntfs-3g`; GUI hints and runner probe-time NTFS
+  gate updated. CodeRabbit follow-ups: README version sync, archived plan
+  paths, PREFIX flag precedence, dyld empty-array guard, Darwin-guard test
+  anchoring, generic `fat` Content hint, docstring coverage on touched tests.
+
+### Fixed
+
+- Installer phase-2 messaging clarifies manifest re-hash limits; post-install
+  assert requires both `dislocker_fuse` and `ntfs3g` explicitly.
+
+## [0.4.2] - 2026-08-06
+
+### Fixed
+
+- Sonar PR gate: sanitize FAT mount argv (pythonsecurity:S8705); reduce
+  `fs_probe._partition_devices` cognitive complexity; split composite pytest
+  asserts in `test_gui` / `test_install_script_static`.
+
+## [0.4.1] - 2026-08-05
+
+
+### Fixed
+
+- GUI `_raise_root_window` pulses `-topmost` on first launch; covered in
+  `test_gui.py`.
+- FAT/ExFAT `-m 700` (not `077`); `test_fs_mount` asserts the mode. `077` is a
+  permission *mode* on `mount_msdos`, not a umask — owner had no access.
+
+### Changed
+
+- `run.sh` exits non-zero unless `id -u` is 0; static test covers the guard.
+  README / AGENTS document `sudo ./run.sh` as the supported launcher.
+
+## [0.4.0] - 2026-08-05
+
+### Added
+
+- `fs_probe.py` / `fat_mount.py` and `tests/test_fs_mount.py` for post-decrypt
+  FAT/ExFAT routing. Archived root-deps installer plan under `plans/archive/`.
+
 ## [Unreleased]
 
 ### Security
@@ -17,6 +72,61 @@ Version numbers match `VERSION` / SemVer with the public changelog.
 
 - Extracted privileged staging/session policy from `runner.py` and tightened
   the source-file hard cap from 800 to 750 lines.
+
+## [0.3.1] - 2026-08-05
+
+### Added
+
+- `scripts/install-root-deps.sh` and `tests/test_install_script_static.py`
+  (static, macOS-independent assertions on the installer). The installer is
+  covered by the manual macOS matrix, not unit tests (it runs as root).
+
+### Notes
+
+- Pinned upstream commit SHAs the installer builds:
+  - dislocker (`master`): `38dab03175cb5798d625375154e716665201bae1`
+  - ntfs-3g (`2026.7.7` / edge lineage):
+    `d327833ec1d5eb1358b6f2c37139f10a3460944d`
+    (not `master` tip — that branch lacks Darwin xattr `position` and fails
+    against macFUSE fuse2; matches Homebrew `ntfs-3g-mac`)
+- dislocker `master` requires the fuse3 API; macFUSE ships it (and libfuse2)
+  in `/usr/local/lib` since 4.10, so the script seeds
+  `PKG_CONFIG_PATH=/usr/local/lib/pkgconfig` and gates on
+  `pkg-config --exists fuse3`.
+- dislocker sets its own install RPATH, so the script passes no
+  `-DCMAKE_INSTALL_RPATH`. Plan: `plans/archive/2026-08-05-root-deps-install.md`.
+- Real-hardware findings (macFUSE 5.3.3, Apple Silicon):
+  - macFUSE is a kext, not a System Extension — `systemextensionsctl` never
+    lists it. Detection uses `macfuse_installed()` (bundle dir / pkg-config),
+    not kext loadedness; kext approval is a first-mount concern.
+  - macFUSE ships libfuse into a user-owned `/usr/local/lib` even on Apple
+    Silicon, so phase 2 vendors libfuse root-owned into `$PREFIX/lib`
+    (`install_name_tool` + ad-hoc `codesign`) to keep the dyld closure
+    root-managed. Only `MFMount.framework` (root-owned under
+    `/Library/Filesystems/macfuse.fs`) is left in place.
+  - First end-to-end install failed compiling `dislocker-fuse.c` against
+    fuse3 3.18.2 (`fuse_darwin_attr` vs `struct stat`). Fixed by passing
+    `-DCMAKE_C_FLAGS=-DFUSE_DARWIN_ENABLE_EXTENSIONS=0` (macFUSE#1064;
+    same approach as nixpkgs). Static test asserts the flag.
+  - After that, stage-install failed creating `/opt/local/lib` as the
+    unprivileged user: dislocker bakes absolute `libdir`/`bindir` into
+    `install()` rules, so `cmake --install --prefix $STAGEDIR$PREFIX` does
+    not remap them. Switched to `DESTDIR=$STAGEDIR cmake --install` (same
+    as ntfs-3g; matches dislocker's own `$ENV{DESTDIR}` symlink install).
+  - ntfs-3g at master tip then failed on Darwin fuse2 xattr signatures
+    (`getxattr`/`setxattr` need `uint32_t position`). Bumped pin to
+    `2026.7.7` (`d327833…`), which has the Darwin wrappers.
+  - Build then succeeded through vendor + otool, but
+    `discover_privileged_deps().core_ok` failed missing `ntfs-3g`:
+    with `--exec-prefix` set, ntfs-3g installs via `rootbindir=$(bindir)`
+    (default `$PREFIX/bin`). Added `--bindir=$PREFIX/sbin`.
+  - First successful install still failed at mount: dyld could not load
+    `@rpath/libdislocker.0.7.dylib` because phase2's `find -type f` skipped
+    cmake's versioned dylib symlinks, and `verify_dyld_closure` ignored
+    `@rpath` / `LC_RPATH`. Added `install_staged_lib_symlinks`,
+    `sanitize_rpaths` (drop Homebrew mbedtls rpath), and tightened the
+    otool gate to require `@rpath` names under `$PREFIX/lib` and only
+    `$PREFIX/lib` as LC_RPATH.
 
 ## [0.2.0] - 2026-07-31
 

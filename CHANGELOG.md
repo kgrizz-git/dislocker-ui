@@ -7,6 +7,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.4.4] - 2026-08-06
+
+### Changed
+
+- Without `ntfs-3g`, the GUI forces read-only (volume type is unknown until
+  after decrypt). FAT/ExFAT RO mounts still work; NTFS still requires ntfs-3g.
+
+### Fixed
+
+- `run.sh` writable-path check uses BSD `stat -f` instead of `find -maxdepth`.
+
+## [0.4.3] - 2026-08-06
+
+### Changed
+
+- Core dependency check no longer requires `ntfs-3g`. FAT/ExFAT BitLocker To Go
+  volumes can mount with only `dislocker-fuse` + system mount helpers; NTFS still
+  needs `ntfs-3g` and fails with a clear error when it is missing.
+- `run.sh` documents the checkout-as-root ownership model and refuses
+  group-/world-writable launcher/`src` paths before `exec`.
+
+### Fixed
+
+- Installer: explicit `--prefix` wins over a `PREFIX` env default; empty dyld
+  target lists are guarded under bash 3.2 `set -u`; manifest re-check messaging
+  no longer claims a full TOCTOU close.
+
+## [0.4.2] - 2026-08-06
+
+### Fixed
+
+- FAT/ExFAT mount argv is validated before `subprocess` (physical `/dev/disk*`
+  only, safe absolute mountpoints, bounded uid/gid) so untrusted request fields
+  cannot reach OS commands.
+
+## [0.4.1] - 2026-08-05
+
+
+### Fixed
+
+- Main window is raised to the front on launch so it is not hidden behind
+  Terminal (or another launcher) on macOS.
+- FAT/ExFAT mounts use `-m 700` (owner-readable mode). The previous `-m 077`
+  left owner bits clear, so Finder showed a red/empty volume after a successful
+  mount.
+
+### Changed
+
+- `run.sh` requires root (`sudo ./run.sh`). Unprivileged launches cannot open
+  removable `/dev/disk*` under macOS TCC, so a non-sudo GUI could not complete
+  a useful mount.
+
+## [0.4.0] - 2026-08-05
+
+### Added
+
+- BitLocker To Go volumes whose inner filesystem is **FAT32** or **ExFAT** now
+  mount after decrypt via system `mount_msdos` / `mount_exfat` (NTFS volumes
+  still use ntfs-3g).
+
+## [0.3.1] - 2026-08-05
+
+### Added
+
+- Optional root-managed install script (`scripts/install-root-deps.sh`) that
+  builds `dislocker-fuse` and `ntfs-3g` from source and installs them
+  root-owned into `/opt/local/sbin` (or `/usr/local/sbin`) so the elevated
+  mount flow trusts them. Fully supported on Apple Silicon; on Intel it
+  refuses with a clear message when Homebrew owns `/usr/local` (macFUSE's
+  libfuse would then load from a user-writable directory).
+- The GUI "Privileged tools unavailable" dialog now points at the script.
+
+### Fixed
+
+- Root installer builds dislocker against macFUSE ≥4.10 by compiling with
+  `-DFUSE_DARWIN_ENABLE_EXTENSIONS=0` (vanilla FUSE3 API). Without that flag
+  AppleClang rejects `getattr`/`readdir` as incompatible with
+  `fuse_darwin_attr`.
+- Root installer stages dislocker with `DESTDIR` instead of
+  `cmake --install --prefix`. Absolute `bindir`/`libdir` install rules were
+  writing `/opt/local/lib` during the unprivileged build phase.
+- Root installer pins ntfs-3g to the `2026.7.7` release (Darwin
+  `getxattr`/`setxattr` position API). The previous `master` tip failed to
+  compile against macFUSE fuse2.
+- Root installer configures ntfs-3g with `--bindir=$PREFIX/sbin` so
+  `ntfs-3g` (a `rootbin_PROGRAM`) lands in the sbin path
+  `discover_privileged_deps` accepts. `--sbindir` alone left it in `bin`.
+- Root installer recreates versioned `libdislocker.*.dylib` symlinks and
+  strips Homebrew `LC_RPATH` entries so `@rpath/libdislocker.0.7.dylib`
+  resolves under `$PREFIX/lib` at mount time.
+
 ## [0.3.0] - 2026-08-05
 
 ### Security

@@ -27,7 +27,7 @@ import pytest
 
 from dislocker_ui.deps import DepsStatus
 from dislocker_ui.disks import DiskEntry
-from dislocker_ui.gui import DislockerApp, run_app
+from dislocker_ui.gui import DislockerApp, _raise_root_window, run_app
 from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod
 from dislocker_ui.session import MountSession
 
@@ -169,10 +169,13 @@ def test_init_shows_core_ok_and_no_session(tk_root: tk.Tk) -> None:
 
 
 def test_rw_hint_when_ntfs3g_missing(tk_root: tk.Tk) -> None:
-    """Without ntfs-3g, hint says mounts are unavailable (not RO-only)."""
+    """Without ntfs-3g, mounts stay read-only; FAT/ExFAT still noted as OK."""
     app = _build_app(tk_root, deps=_core_deps(ntfs3g=None))
-    assert "unavailable" in app.rw_hint.cget("text")
-    assert "only read-only" not in app.rw_hint.cget("text")
+    text = app.rw_hint.cget("text")
+    assert "ntfs-3g missing" in text
+    assert "read-only" in text
+    assert "FAT/ExFAT" in text
+    assert app.readonly_var.get() is True
     assert str(app.readonly_check.cget("state")) == str(tk.DISABLED)
 
 
@@ -206,9 +209,10 @@ def test_init_reads_the_canonical_active_session_path(tk_root: tk.Tk) -> None:
 
 
 def test_rw_available_when_ntfs3g_present(tk_root: tk.Tk) -> None:
-    """ntfs-3g unlocks the writable mount option and hint text."""
+    """With ntfs-3g, core banner and writable hint are shown; RW is enabled."""
     app = _build_app(tk_root, deps=_core_deps(ntfs3g="/bin/ntfs-3g"))
     assert "Core tools OK" in app.deps_label.cget("text")
+    assert "ntfs-3g present" in app.deps_label.cget("text")
     assert "writable" in app.rw_hint.cget("text")
     assert str(app.readonly_check.cget("state")) == str(tk.NORMAL)
 
@@ -291,7 +295,7 @@ def test_recheck_deps_refreshes_label(tk_root: tk.Tk) -> None:
     ):
         app._recheck_deps()
     assert "Core tools OK" in app.deps_label.cget("text")
-    assert "ntfs-3g required" in app.deps_label.cget("text")
+    assert "ntfs-3g present" in app.deps_label.cget("text")
     assert "Dependency check refreshed" in app.log_text.get("1.0", tk.END)
 
 
@@ -319,6 +323,7 @@ def test_on_mount_preflights_privileged_tools_before_prompt(tk_root: tk.Tk) -> N
     ):
         app.on_mount()
     assert "root-managed" in showerror.call_args.args[1]
+    assert "scripts/install-root-deps.sh" in showerror.call_args.args[1]
     mount.assert_not_called()
     assert app._busy is False
 
@@ -472,7 +477,7 @@ def test_set_busy_disables_buttons(tk_root: tk.Tk) -> None:
 
 
 def test_run_app_uses_aqua_when_available() -> None:
-    """run_app constructs the root, prefers aqua, and enters mainloop."""
+    """run_app constructs the root, prefers aqua, raises to front, and enters mainloop."""
     root = MagicMock()
     style = MagicMock()
     style.theme_names.return_value = ("aqua", "clam")
@@ -481,11 +486,13 @@ def test_run_app_uses_aqua_when_available() -> None:
         patch("dislocker_ui.gui.tk.Tk", return_value=root),
         patch("dislocker_ui.gui.ttk.Style", return_value=style),
         patch("dislocker_ui.gui.DislockerApp") as app_cls,
+        patch("dislocker_ui.gui._raise_root_window") as raise_root,
     ):
         run_app()
 
     style.theme_use.assert_called_once_with("aqua")
     app_cls.assert_called_once_with(root)
+    raise_root.assert_called_once_with(root)
     root.mainloop.assert_called_once()
 
 
@@ -497,8 +504,32 @@ def test_run_app_ignores_style_tcl_error() -> None:
         patch("dislocker_ui.gui.tk.Tk", return_value=root),
         patch("dislocker_ui.gui.ttk.Style", side_effect=tk.TclError("no display")),
         patch("dislocker_ui.gui.DislockerApp") as app_cls,
+        patch("dislocker_ui.gui._raise_root_window") as raise_root,
     ):
         run_app()
 
     app_cls.assert_called_once_with(root)
+    raise_root.assert_called_once_with(root)
     root.mainloop.assert_called_once()
+
+
+def test_raise_root_window_pulses_topmost() -> None:
+    """First-launch raise uses a temporary topmost attribute then clears it."""
+    root = MagicMock()
+    callbacks: list[tuple[int, object]] = []
+
+    def capture_after(delay: int, fn: object) -> None:
+        callbacks.append((delay, fn))
+
+    root.after.side_effect = capture_after
+    _raise_root_window(root)
+
+    root.update_idletasks.assert_called_once()
+    root.deiconify.assert_called_once()
+    root.lift.assert_called_once()
+    root.focus_force.assert_called_once()
+    root.attributes.assert_any_call("-topmost", True)
+    assert callbacks
+    assert callbacks[0][0] == 50
+    callbacks[0][1]()
+    root.attributes.assert_any_call("-topmost", False)

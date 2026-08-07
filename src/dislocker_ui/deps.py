@@ -3,7 +3,8 @@ Dependency discovery for dislocker-ui.
 
 Overall purpose:
   Locate binaries needed for mount/unmount and report whether the core
-  toolchain (including ntfs-3g) is available.
+  decrypt/attach toolchain is available. ntfs-3g is required only for NTFS
+  volumes; FAT/ExFAT BitLocker To Go uses system mount helpers.
 
 Inputs:
   Optional PATH overrides via the process environment (standard shutil.which).
@@ -13,8 +14,6 @@ Outputs:
 
 Requirements:
   Standard library only (shutil, dataclasses).
-  On modern macOS, ntfs-3g is required for both read-only and read/write mounts
-  (kernel mount_ntfs is unavailable).
 """
 
 from __future__ import annotations
@@ -48,24 +47,31 @@ class DepsStatus:
 
     @property
     def core_ok(self) -> bool:
-        """True when the minimum mount toolchain (including ntfs-3g) is present."""
-        return bool(
-            self.dislocker_fuse and self.hdiutil and self.diskutil and self.umount and self.ntfs3g
-        )
+        """True when decrypt/attach tools are present (ntfs-3g optional)."""
+        return bool(self.dislocker_fuse and self.hdiutil and self.diskutil and self.umount)
 
     @property
     def can_write(self) -> bool:
-        """True when ntfs-3g is available for writable NTFS mounts."""
+        """True when the UI may offer writable mounts (needs ntfs-3g).
+
+        Volume type is unknown until after decrypt, so without ntfs-3g the GUI
+        stays read-only. FAT/ExFAT still mount RO via core tools; NTFS needs
+        ntfs-3g for both RO and RW.
+        """
+        return self.core_ok and self.has_ntfs3g
+
+    @property
+    def has_ntfs3g(self) -> bool:
+        """True when ntfs-3g is available for NTFS mounts."""
         return bool(self.ntfs3g)
 
     def missing_core(self) -> list[str]:
-        """Return names of required tools that were not found."""
+        """Return names of required decrypt/attach tools that were not found."""
         mapping = {
             "dislocker-fuse": self.dislocker_fuse,
             "hdiutil": self.hdiutil,
             "diskutil": self.diskutil,
             "umount": self.umount,
-            "ntfs-3g": self.ntfs3g,
         }
         return [name for name, path in mapping.items() if not path]
 

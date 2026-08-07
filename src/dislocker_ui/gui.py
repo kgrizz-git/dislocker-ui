@@ -39,6 +39,7 @@ class DislockerApp(ttk.Frame):
     """Main application frame."""
 
     def __init__(self, master: tk.Tk) -> None:
+        """Build the main frame and load initial deps, disks, and session state."""
         super().__init__(master, padding=12)
         self.master = master
         self.deps: DepsStatus = discover_deps()
@@ -142,24 +143,35 @@ class DislockerApp(ttk.Frame):
     def _refresh_deps_label(self) -> None:
         """Update the dependency summary line."""
         if self.deps.core_ok:
-            text = (
-                f"dislocker: {self.deps.dislocker_fuse}\n"
-                "Core tools OK (ntfs-3g required for RO and RW mounts)."
+            ntfs_note = (
+                "ntfs-3g present (NTFS OK)."
+                if self.deps.has_ntfs3g
+                else "ntfs-3g missing (FAT/ExFAT OK; NTFS needs ntfs-3g)."
             )
+            text = f"dislocker: {self.deps.dislocker_fuse}\nCore tools OK. {ntfs_note}"
         else:
             missing = ", ".join(self.deps.missing_core())
             text = f"Missing required tools: {missing}. See README."
         self.deps_label.configure(text=text)
 
     def _update_rw_hint(self) -> None:
-        """Enable/disable RW based on ntfs-3g presence."""
+        """Enable RW only when ntfs-3g is present; otherwise force read-only."""
         if self.deps.can_write:
-            self.rw_hint.configure(text="Uncheck Read-only to mount with ntfs-3g (writable).")
+            self.rw_hint.configure(
+                text="Uncheck Read-only for writable NTFS (ntfs-3g) or FAT/ExFAT mounts."
+            )
             self.readonly_check.configure(state=tk.NORMAL)
+        elif self.deps.core_ok:
+            # Mounts still work (FAT/ExFAT RO; NTFS blocked later without ntfs-3g).
+            self.readonly_var.set(True)
+            self.rw_hint.configure(
+                text="ntfs-3g missing — read-only only (FAT/ExFAT OK; NTFS needs ntfs-3g)."
+            )
+            self.readonly_check.configure(state=tk.DISABLED)
         else:
             self.readonly_var.set(True)
             self.rw_hint.configure(
-                text="ntfs-3g not found — mounts are unavailable until it is installed."
+                text="Core tools missing — mounts are unavailable until they are installed."
             )
             self.readonly_check.configure(state=tk.DISABLED)
 
@@ -208,6 +220,7 @@ class DislockerApp(ttk.Frame):
         """Append a log line (thread-safe via after)."""
 
         def _append() -> None:
+            """Insert one log line on the UI thread."""
             self.log_text.insert(tk.END, message.rstrip() + "\n")
             self.log_text.see(tk.END)
 
@@ -246,8 +259,9 @@ class DislockerApp(ttk.Frame):
                     "Privileged tools unavailable",
                     "Mounting requires root-managed tools before administrator authorization.\n\n"
                     f"Missing trusted tools: {missing}\n\n"
-                    "An administrator must install dislocker-fuse and ntfs-3g under "
-                    "/usr/local/sbin or /opt/local/sbin. See README.",
+                    "An administrator must install dislocker-fuse under "
+                    "/usr/local/sbin or /opt/local/sbin (ntfs-3g too for NTFS). See README.\n\n"
+                    "One-time install: sudo scripts/install-root-deps.sh (from the repo root).",
                 )
                 return
 
@@ -260,6 +274,7 @@ class DislockerApp(ttk.Frame):
         )
 
         def worker() -> None:
+            """Background mount worker; posts results back to the UI thread."""
             try:
                 session = mount_volume(req, self.deps, self.log)
                 mount_path = session.ntfs_mount
@@ -310,6 +325,7 @@ class DislockerApp(ttk.Frame):
             return
 
         def worker() -> None:
+            """Background unmount worker; posts results back to the UI thread."""
             try:
                 unmount_volume(self.deps, self.log)
                 self.master.after(0, lambda: messagebox.showinfo("Unmounted", "Volume unmounted."))
@@ -349,6 +365,24 @@ class DislockerApp(ttk.Frame):
         threading.Thread(target=worker, daemon=True).start()
 
 
+def _raise_root_window(root: tk.Tk) -> None:
+    """Bring the main window to the front on first launch.
+
+    When started from Terminal (or another app), macOS often opens Tk behind the
+    launcher. A brief ``-topmost`` pulse plus ``lift`` / ``focus_force`` makes
+    the window visible without keeping it permanently always-on-top.
+    """
+    try:
+        root.update_idletasks()
+        root.deiconify()
+        root.lift()
+        root.attributes("-topmost", True)
+        root.after(50, lambda: root.attributes("-topmost", False))
+        root.focus_force()
+    except tk.TclError:
+        pass
+
+
 def run_app() -> None:
     """Create the Tk root and start the main loop."""
     root = tk.Tk()
@@ -360,4 +394,5 @@ def run_app() -> None:
     except tk.TclError:
         pass
     DislockerApp(root)
+    _raise_root_window(root)
     root.mainloop()

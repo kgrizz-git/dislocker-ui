@@ -2,9 +2,10 @@
 Mount/unmount orchestration for dislocker-ui.
 
 Overall purpose:
-  Drive the macOS sequence: dislocker-fuse → hdiutil attach → NTFS mount,
-  and the reverse for Unmount. Commands are logged via a callback; secrets are
-  never written to the log.
+  Drive the macOS sequence: dislocker-fuse → hdiutil attach → filesystem
+  mount (ntfs-3g for NTFS; mount_msdos / mount_exfat for FAT/ExFAT), and the
+  reverse for Unmount. Commands are logged via a callback; secrets are never
+  written to the log.
 
 Inputs:
   MountRequest (volume, unlock method, credentials, readonly).
@@ -16,7 +17,8 @@ Outputs:
   /tmp), raw disk attach, /Volumes mount, session file.
 
 Requirements:
-  dislocker-fuse, hdiutil, umount, and ntfs-3g (RO and RW on modern macOS).
+  dislocker-fuse, hdiutil, umount; ntfs-3g for NTFS volumes; system
+  mount_msdos / mount_exfat for FAT/ExFAT BitLocker To Go volumes.
 """
 
 from __future__ import annotations
@@ -34,6 +36,8 @@ from enum import Enum
 from pathlib import Path
 
 from dislocker_ui.deps import DepsStatus
+from dislocker_ui.fat_mount import mount_fat as _mount_fat
+from dislocker_ui.fs_probe import resolve_mount_filesystem
 from dislocker_ui.mount_policy import (
     VOLUMES_ROOT,
     allocate_privileged_fuse_path,
@@ -168,11 +172,13 @@ def _mount_in_process(
             diagnostic_log_path=_diagnostic_log_path(elevated, session_path),
         )
 
-        log("Attaching raw NTFS image with hdiutil…")
+        log("Attaching raw filesystem image with hdiutil…")
         raw_disk = _hdiutil_attach(deps, dislocker_file, log)
         log(f"Attached as {raw_disk}")
 
-        used_ntfs3g = _mount_ntfs(deps, req, raw_disk, ntfs_mount, log, uid=uid, gid=gid)
+        used_ntfs3g = _mount_decrypted_volume(
+            deps, req, raw_disk, ntfs_mount, log, uid=uid, gid=gid
+        )
         _assert_mount_owner(ntfs_mount, uid=uid, gid=gid, log=log)
         session = MountSession(
             volume=volume,
@@ -373,9 +379,39 @@ def _run_with_fallback(
     return errors
 
 
+def _mount_decrypted_volume(
+    deps: DepsStatus,
+    req: MountRequest,
+    raw_disk: str,
+    mountpoint: Path,
+    log: LogFn,
+    *,
+    uid: int | None,
+    gid: int | None,
+) -> bool:
+    """Probe the attached image and mount via ntfs-3g or mount_msdos/exfat."""
+    diskutil = deps.diskutil or "/usr/sbin/diskutil"
+    try:
+        device, kind = resolve_mount_filesystem(diskutil, raw_disk)
+    except RuntimeError as exc:
+        raise RunnerError(str(exc)) from exc
+    if device != raw_disk:
+        log(f"Using partition {device} ({kind}) on attached image {raw_disk}")
+    else:
+        log(f"Detected {kind} on {device}")
+    if kind == "ntfs":
+        if not deps.ntfs3g:
+            raise RunnerError(
+                "NTFS volume requires ntfs-3g (not found). "
+                "FAT/ExFAT BitLocker To Go volumes do not need it."
+            )
+        return _mount_ntfs(deps, req, device, mountpoint, log, uid=uid, gid=gid)
+    return _mount_fat(req, device, mountpoint, log, kind=kind, uid=uid, gid=gid)
+
+
 def _unmount_ntfs(deps: DepsStatus, session: MountSession, log: LogFn) -> list[str]:
-    """Unmount the NTFS volume, forcing via diskutil if needed."""
-    log(f"Unmounting NTFS at {session.ntfs_mount}…")
+    """Unmount the decrypted volume mountpoint, forcing via diskutil if needed."""
+    log(f"Unmounting volume at {session.ntfs_mount}…")
     return _run_with_fallback(
         [deps.umount, session.ntfs_mount],
         [deps.diskutil or "/usr/sbin/diskutil", "unmount", "force", session.ntfs_mount],
@@ -589,11 +625,13 @@ def _best_effort_cleanup(
 
 
 def _validate_volume_label(label: str) -> None:
+    """Reject volume labels that are unsafe as /Volumes children."""
     if not is_safe_volume_label(label):
         raise RunnerError("Volume label must be a short filesystem-safe display name")
 
 
 def _validate_elevated_request(req: MountRequest) -> None:
+    """Reject elevated mount requests that fail the shared mount policy."""
     error = elevated_request_error(req.volume, req.readonly, req.volume_label)
     if error:
         raise RunnerError(error)

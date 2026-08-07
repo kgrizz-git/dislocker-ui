@@ -167,7 +167,7 @@ def test_main_fails_before_mount_when_trusted_deps_missing(tmp_path: Path) -> No
         patch("dislocker_ui.privileged._open_root_log", return_value=StringIO()),
         patch(
             "dislocker_ui.privileged.discover_privileged_deps",
-            return_value=MagicMock(core_ok=False, missing_core=lambda: ["ntfs-3g"]),
+            return_value=MagicMock(core_ok=False, missing_core=lambda: ["dislocker-fuse"]),
         ),
         patch("dislocker_ui.privileged.mount_volume") as mount,
     ):

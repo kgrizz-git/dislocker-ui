@@ -2,9 +2,10 @@
 
 Simple macOS GUI frontend for [dislocker](https://github.com/Aorimn/dislocker).
 It does **not** fork or reimplement BitLocker crypto — it shells out to an
-installed `dislocker-fuse` and then attaches/mounts the resulting NTFS image.
+installed `dislocker-fuse` and then attaches/mounts the resulting filesystem
+image (NTFS via ntfs-3g, or FAT/ExFAT via system mount helpers).
 
-**Version:** see `VERSION` (currently 0.3.0).
+**Version:** see `VERSION` (currently 0.4.4).
 
 Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
@@ -12,13 +13,18 @@ Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
 ## What it does
 
 1. Unlock a BitLocker volume with a user password, recovery password, or `.bek` file.
-2. Mount the decrypted NTFS image under `/Volumes` via **ntfs-3g** (read-only by default).
-3. Unmount cleanly (NTFS → detach raw disk → unmount FUSE).
+2. Mount the decrypted image under `/Volumes` (read-only by default): **ntfs-3g**
+   for NTFS, system **mount_msdos** / **mount_exfat** for BitLocker To Go FAT/ExFAT.
+3. Unmount cleanly (volume → detach raw disk → unmount FUSE).
 
-On modern macOS the GUI is unprivileged; Mount/Unmount request **administrator
-privileges** (macOS password dialog) so the full pipeline can open `/dev/disk*`
-and mount under `/Volumes`. Cancel and timeout have distinct messages. Unmount
-of an elevated session asks for admin again (two prompts per cycle).
+On modern macOS, launch with **`sudo ./run.sh`**. The GUI then runs already-root
+and mounts in-process (no osascript administrator dialog). An unprivileged
+GUI cannot open removable `/dev/disk*` under TCC, so non-sudo launches cannot
+complete a useful mount.
+
+`run.sh` executes the **checkout** as root (`PYTHONPATH=…/src`). Keep the repo
+owned by you and not group-/world-writable; do not `sudo` a shared or untrusted
+tree. A separate root-owned app package is out of scope for this personal helper.
 
 Elevated GUI mounts intentionally support physical BitLocker devices
 (`/dev/diskN` or `/dev/diskNsM`) only; regular image files are out of scope.
@@ -31,7 +37,7 @@ Elevated GUI mounts intentionally support physical BitLocker devices
 | Python 3.10+ with tkinter | Yes | GUI |
 | [dislocker](https://github.com/Aorimn/dislocker) | Yes | BitLocker unlock (`dislocker-fuse`) |
 | **macFUSE** | Yes | Required for dislocker + ntfs-3g options used here (`allow_other` / `local` / uid). **FUSE-T is not validated in 0.2.0.** |
-| **`ntfs-3g`** | **Yes** | RO and RW NTFS mounts (kernel `mount_ntfs` is missing on recent macOS) |
+| **`ntfs-3g`** | **Yes** (for NTFS) | RO and RW NTFS mounts (kernel `mount_ntfs` is missing on recent macOS). FAT/ExFAT BitLocker To Go uses system `mount_msdos` / `mount_exfat`. |
 
 This project does **not** bundle FUSE or ntfs-3g (system extensions / installers).
 
@@ -55,6 +61,10 @@ brew install --cask macfuse
 open the `.dmg` from the Homebrew cache and run **Install macFUSE.pkg**.)
 
 ### 3. dislocker + ntfs-3g (macOS Homebrew)
+
+The Homebrew build below satisfies the **GUI preflight check** only; the
+elevated mount flow requires root-owned binaries. Run
+`scripts/install-root-deps.sh` once (section 4) to satisfy both.
 
 Homebrew core’s `dislocker` / `ntfs-3g` formulae are awkward on modern macOS
 (no bottles / FUSE disabled). Use the community macFUSE tap:
@@ -105,7 +115,34 @@ Notes:
   `sudo ./run.sh` remains a power-user escape hatch (already-root path skips
   osascript). Elevating from a user-writable checkout is no stronger than that.
 
-### 4. This app
+### 4. One-time root install (optional helper)
+
+The Homebrew path above is advisory only. To make the **elevated mount flow**
+trust the toolchain, run the installer once — it builds `dislocker-fuse` and
+`ntfs-3g` **from source** and installs them root-owned into `/opt/local/sbin`:
+
+```bash
+sudo scripts/install-root-deps.sh          # or: --prefix /usr/local
+```
+
+- **From source, not a copy:** a copied Homebrew binary keeps load commands
+  pointing at the user-owned Homebrew prefix, so a root-trusted binary would
+  load user-mutable dylibs. A `--prefix` build plus vendoring keeps the whole
+  dyld closure root-managed.
+- **libfuse is vendored:** macFUSE installs its libfuse into `/usr/local/lib`,
+  which is often user-owned (true even on Apple Silicon). The installer copies
+  libfuse root-owned into the install prefix and re-points the binaries, so no
+  root-trusted binary loads a library from a user-writable directory. Works on
+  both Apple Silicon and Intel.
+- **macFUSE:** if macFUSE isn't installed, the script installs the cask and
+  asks you to re-run. macFUSE's kernel extension is approved the first time you
+  actually **mount** a FUSE volume (on Apple Silicon this can require enabling
+  kernel extensions in Recovery, then a reboot) — there is no "system
+  extension" to approve in Privacy & Security beforehand.
+- This is optional; the manual Homebrew + tap path (section 3) remains valid
+  for the GUI advisory check.
+
+### 5. This app
 
 ```bash
 cd /path/to/dislocker-ui
@@ -117,42 +154,40 @@ No Python packages beyond the stdlib (tkinter) are required.
 ## Usage
 
 1. Plug in / attach the BitLocker disk.
-2. Launch the UI:
+2. Launch the UI **with sudo** (required so mounts can open removable
+   `/dev/disk*` under macOS TCC; an unprivileged GUI cannot complete a useful
+   mount):
 
 ```bash
 cd /path/to/dislocker-ui
-./run.sh
+sudo ./run.sh
 ```
 
-Or:
-
-```bash
-cd /path/to/dislocker-ui
-PYTHONPATH=src python3 -m dislocker_ui
-```
+`SUDO_UID` / `SUDO_GID` are preserved so mounted files are owned by your user,
+not root. Running `python3 -m dislocker_ui` without sudo is unsupported for
+real mounts.
 
 3. Select a volume (or type `/dev/diskXsY`).
 4. Choose unlock method: user password, recovery password, or `.bek` file.
-5. Leave **Read-only** checked unless you need writes (ntfs-3g required either way).
-6. Click **Mount**, complete the macOS administrator prompt, then open the path
-   under `/Volumes` (shown in the dialog / status line).
-7. When finished, click **Unmount** (second admin prompt if the session was
-   elevated) before ejecting the disk or shutting down.
-
-Already-root / `sudo ./run.sh` skips the osascript dialog and mounts in-process.
+5. Leave **Read-only** checked unless you need writes.
+6. Click **Mount**, then open the path under `/Volumes` (shown in the dialog /
+   status line).
+7. When finished, click **Unmount** before ejecting the disk or shutting down.
 
 ## Read vs write
 
 | Goal | What you need |
 |------|----------------|
-| Browse files (read) | dislocker + macFUSE + **ntfs-3g** (`-o ro`) |
+| Browse files (read) | dislocker + macFUSE + **ntfs-3g** (NTFS) or **mount_msdos/exfat** (FAT/ExFAT) |
 | Edit/copy onto the volume (write) | same + uncheck Read-only |
 
 - **Dislocker** handles BitLocker. With `-r` (this app’s default) the FUSE layer
   is read-only as well.
-- **ntfs-3g** is required for both RO and RW on modern macOS (no `mount_ntfs`).
-- Mount options include `umask=077` with `allow_other` so other local accounts
-  cannot read the decrypted volume.
+- **After decrypt**, the app probes the attached image: **NTFS** uses
+  **ntfs-3g** (required on modern macOS; no `mount_ntfs`); **FAT/ExFAT**
+  (BitLocker To Go) uses system `mount_msdos` / `mount_exfat`.
+- NTFS mounts use `umask=077` with `allow_other`. FAT/ExFAT mounts use
+  `-u/-g` from `SUDO_UID`/`SUDO_GID` and `-m 700` (owner-only mode bits).
 
 ## Safety notes
 
@@ -165,9 +200,10 @@ Already-root / `sudo ./run.sh` skips the osascript dialog and mounts in-process.
   `Library/Application Support/dislocker-ui/` folder; a killed-run request is
   swept before the next Mount/Unmount. The privileged helper derives its
   session state and diagnostics beneath root-controlled `/var/db/dislocker-ui/`.
+  Prefer `sudo ./run.sh` so the GUI is already root and skips that path.
 - Always use **Unmount** in the app before ejecting the disk or sleeping the Mac.
-- Elevation does not harden a world-writable source tree — treat
-  `sudo ./run.sh` and elevating this checkout similarly.
+- Running the GUI as root does not harden a world-writable source tree — keep
+  the checkout private.
 
 ## Layout
 

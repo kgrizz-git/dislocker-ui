@@ -66,6 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         log_fp.flush()
 
         def log(message: str) -> None:
+            """Write one diagnostic line to the root log file."""
             if log_fp is None:
                 raise RunnerError("privileged diagnostic log is unavailable")
             log_fp.write(message + "\n")
@@ -207,6 +208,7 @@ def _validate_request(payload: dict[str, Any], *, expected_action: str, expected
 
 
 def _validate_mount_fields(payload: dict[str, Any]) -> None:
+    """Validate mount-specific fields in an elevated request payload."""
     volume = payload.get("volume")
     if not is_physical_volume(volume):
         raise _ValidationError("volume must be a physical /dev/diskN or /dev/diskNsM device")
@@ -240,6 +242,7 @@ def _validated_gid(uid: int, gid: int) -> int:
 
 
 def _mount_request_from_payload(payload: dict[str, Any]) -> MountRequest:
+    """Build a MountRequest from a validated elevated payload."""
     return MountRequest(
         volume=payload["volume"],
         method=UnlockMethod(payload["method"]),
@@ -290,6 +293,7 @@ def _verify_session_readable(path: Path, gid: int) -> None:
 
 
 def _append_log_best_effort(log_fp: TextIO | None, message: str) -> None:
+    """Append a log line, ignoring I/O errors during cleanup paths."""
     if log_fp is not None:
         with contextlib.suppress(OSError):
             log_fp.write(message + "\n")
