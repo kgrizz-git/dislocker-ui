@@ -31,7 +31,7 @@ def test_core_ok_without_ntfs3g() -> None:
         ntfs3g=None,
     )
     assert status.core_ok is True
-    assert status.can_write is True
+    assert status.can_write is False
     assert status.has_ntfs3g is False
     assert status.missing_core() == []
 
@@ -51,8 +51,8 @@ def test_core_ok_and_missing_core() -> None:
     assert status.missing_core() == ["diskutil"]
 
 
-def test_can_write_when_core_ok() -> None:
-    """can_write follows core_ok (FAT RW); NTFS still needs has_ntfs3g later."""
+def test_can_write_requires_ntfs3g() -> None:
+    """can_write is true only when core tools and ntfs-3g are both present."""
     status = DepsStatus(
         dislocker_fuse="x",
         hdiutil="x",

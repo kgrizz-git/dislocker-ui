@@ -5,7 +5,7 @@ It does **not** fork or reimplement BitLocker crypto — it shells out to an
 installed `dislocker-fuse` and then attaches/mounts the resulting filesystem
 image (NTFS via ntfs-3g, or FAT/ExFAT via system mount helpers).
 
-**Version:** see `VERSION` (currently 0.4.3).
+**Version:** see `VERSION` (currently 0.4.4).
 
 Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
 [`CONTRIBUTING.md`](CONTRIBUTING.md).

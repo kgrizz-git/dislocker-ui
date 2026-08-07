@@ -40,6 +40,7 @@ def test_run_sh_refuses_group_world_writable_tree() -> None:
     """Before exec, refuse group-/world-writable launcher or src paths."""
     body = _SCRIPT.read_text(encoding="utf-8")
     assert "_check_not_group_world_writable" in body
-    assert "-perm -0020" in body
-    assert "-perm -0002" in body
+    assert "stat -f '%OLp'" in body
+    assert "& 022" in body
     assert "Ownership model" in body
+    assert "-maxdepth" not in body

@@ -20,10 +20,12 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 
 # Refuse a world-/group-writable launcher or src tree before root executes it.
 _check_not_group_world_writable() {
-  local path="$1"
+  local path="$1" mode
   [ -e "$path" ] || return 0
-  # macOS find -perm: reject group-write (020) or other-write (002).
-  if find "$path" -maxdepth 0 \( -perm -0020 -o -perm -0002 \) | grep -q .; then
+  # BSD/macOS stat (this launcher is Darwin-only). %OLp = octal mode bits.
+  mode="$(stat -f '%OLp' "$path")"
+  # Reject group-write (020) or other-write (002).
+  if [ $((8#$mode & 022)) -ne 0 ]; then
     echo "dislocker-ui: refusing world/group-writable path as root: $path" >&2
     exit 1
   fi

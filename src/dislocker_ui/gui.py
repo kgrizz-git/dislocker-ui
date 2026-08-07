@@ -155,17 +155,19 @@ class DislockerApp(ttk.Frame):
         self.deps_label.configure(text=text)
 
     def _update_rw_hint(self) -> None:
-        """Enable RW when core tools exist; note NTFS needs ntfs-3g."""
+        """Enable RW only when ntfs-3g is present; otherwise force read-only."""
         if self.deps.can_write:
-            if self.deps.has_ntfs3g:
-                self.rw_hint.configure(
-                    text="Uncheck Read-only for writable NTFS (ntfs-3g) or FAT/ExFAT mounts."
-                )
-            else:
-                self.rw_hint.configure(
-                    text="ntfs-3g missing — NTFS unavailable; FAT/ExFAT still mount (RW allowed)."
-                )
+            self.rw_hint.configure(
+                text="Uncheck Read-only for writable NTFS (ntfs-3g) or FAT/ExFAT mounts."
+            )
             self.readonly_check.configure(state=tk.NORMAL)
+        elif self.deps.core_ok:
+            # Mounts still work (FAT/ExFAT RO; NTFS blocked later without ntfs-3g).
+            self.readonly_var.set(True)
+            self.rw_hint.configure(
+                text="ntfs-3g missing — read-only only (FAT/ExFAT OK; NTFS needs ntfs-3g)."
+            )
+            self.readonly_check.configure(state=tk.DISABLED)
         else:
             self.readonly_var.set(True)
             self.rw_hint.configure(

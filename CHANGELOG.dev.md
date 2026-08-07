@@ -6,6 +6,17 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.4.4] - 2026-08-06
+
+### Changed
+
+- `DepsStatus.can_write` requires `has_ntfs3g`; GUI RW hint forces RO when
+  ntfs-3g is missing while `core_ok` still allows FAT/ExFAT RO mounts.
+
+### Fixed
+
+- `run.sh` group/world-writable gate uses `stat -f '%OLp'` (BSD/macOS).
+
 ## [0.4.3] - 2026-08-06
 
 ### Changed

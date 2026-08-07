@@ -169,13 +169,14 @@ def test_init_shows_core_ok_and_no_session(tk_root: tk.Tk) -> None:
 
 
 def test_rw_hint_when_ntfs3g_missing(tk_root: tk.Tk) -> None:
-    """Without ntfs-3g, FAT/ExFAT still mount; RW stays enabled with a note."""
+    """Without ntfs-3g, mounts stay read-only; FAT/ExFAT still noted as OK."""
     app = _build_app(tk_root, deps=_core_deps(ntfs3g=None))
     text = app.rw_hint.cget("text")
     assert "ntfs-3g missing" in text
+    assert "read-only" in text
     assert "FAT/ExFAT" in text
-    assert "unavailable" not in text or "NTFS unavailable" in text
-    assert str(app.readonly_check.cget("state")) == str(tk.NORMAL)
+    assert app.readonly_var.get() is True
+    assert str(app.readonly_check.cget("state")) == str(tk.DISABLED)
 
 
 def test_init_missing_deps_label(tk_root: tk.Tk) -> None:

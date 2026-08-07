@@ -52,12 +52,13 @@ class DepsStatus:
 
     @property
     def can_write(self) -> bool:
-        """True when a writable post-decrypt mount is possible.
+        """True when the UI may offer writable mounts (needs ntfs-3g).
 
-        FAT/ExFAT can mount RW via system helpers whenever core tools exist.
-        NTFS RW still needs ntfs-3g, checked later after filesystem probe.
+        Volume type is unknown until after decrypt, so without ntfs-3g the GUI
+        stays read-only. FAT/ExFAT still mount RO via core tools; NTFS needs
+        ntfs-3g for both RO and RW.
         """
-        return self.core_ok
+        return self.core_ok and self.has_ntfs3g
 
     @property
     def has_ntfs3g(self) -> bool:

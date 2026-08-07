@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.4.4] - 2026-08-06
+
+### Changed
+
+- Without `ntfs-3g`, the GUI forces read-only (volume type is unknown until
+  after decrypt). FAT/ExFAT RO mounts still work; NTFS still requires ntfs-3g.
+
+### Fixed
+
+- `run.sh` writable-path check uses BSD `stat -f` instead of `find -maxdepth`.
+
 ## [0.4.3] - 2026-08-06
 
 ### Changed
