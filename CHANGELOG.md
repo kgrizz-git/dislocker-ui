@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.5.0] - 2026-08-07
+
+### Added
+- Password visibility toggle button for user password field. Click "Show" to
+  reveal password in clear text (default: hidden). Passwords automatically
+  re-mask after 30 seconds.
+
 ## [0.4.4] - 2026-08-06
 
 ### Changed
