@@ -27,7 +27,7 @@ import pytest
 
 from dislocker_ui.deps import DepsStatus
 from dislocker_ui.disks import DiskEntry
-from dislocker_ui.gui import DislockerApp, _raise_root_window, run_app
+from dislocker_ui.gui import PWD_AUTO_HIDE_MS, DislockerApp, _raise_root_window, run_app
 from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod
 from dislocker_ui.session import MountSession
 
@@ -533,3 +533,122 @@ def test_raise_root_window_pulses_topmost() -> None:
     assert callbacks[0][0] == 50
     callbacks[0][1]()
     root.attributes.assert_any_call("-topmost", False)
+
+
+def test_password_toggle_defaults_hidden(tk_root: tk.Tk) -> None:
+    """Password field starts masked, toggle button shows 'Show'."""
+    app = _build_app(tk_root)
+
+    assert app.secret_entry.cget("show") == "*"
+    assert not app.pwd_visible
+    assert app.pwd_toggle_btn.cget("text") == "Show"
+
+
+def test_password_toggle_shows_and_hides(tk_root: tk.Tk) -> None:
+    """Toggle button shows password, changes text, and hides again."""
+    app = _build_app(tk_root)
+
+    # Initial state
+    assert app.secret_entry.cget("show") == "*"
+    assert app.pwd_toggle_btn.cget("text") == "Show"
+
+    # Click to show
+    app._toggle_password_visibility()
+    assert app.secret_entry.cget("show") == ""
+    assert app.pwd_visible
+    assert app.pwd_toggle_btn.cget("text") == "Hide"
+
+    # Click to hide
+    app._toggle_password_visibility()
+    assert app.secret_entry.cget("show") == "*"
+    assert not app.pwd_visible
+    assert app.pwd_toggle_btn.cget("text") == "Show"
+
+
+def test_password_toggle_schedules_auto_hide_timer(tk_root: tk.Tk) -> None:
+    """Showing password schedules a 30-second auto-hide timer."""
+    app = _build_app(tk_root)
+
+    with patch.object(app.master, "after", wraps=app.master.after) as after:
+        app._toggle_password_visibility()
+
+    # Timer should be scheduled with correct delay and callback
+    after.assert_called_once_with(PWD_AUTO_HIDE_MS, app._auto_hide_password)
+    assert app._pwd_hide_timer is not None
+    assert app.pwd_visible
+
+
+def test_password_toggle_manual_hide_cancels_timer(tk_root: tk.Tk) -> None:
+    """Manually hiding password cancels the auto-hide timer."""
+    app = _build_app(tk_root)
+
+    # Show (starts timer)
+    app._toggle_password_visibility()
+    timer_id = app._pwd_hide_timer
+    assert timer_id is not None
+
+    # Hide (cancels timer)
+    app._toggle_password_visibility()
+    assert app._pwd_hide_timer is None
+    assert not app.pwd_visible
+
+
+def test_password_toggle_auto_hide_callback(tk_root: tk.Tk) -> None:
+    """Auto-hide callback toggles password back to hidden."""
+    app = _build_app(tk_root)
+
+    app._toggle_password_visibility()  # show
+    assert app.pwd_visible
+
+    app._auto_hide_password()  # simulate timer callback
+    assert not app.pwd_visible
+    assert app.secret_entry.cget("show") == "*"
+    assert app._pwd_hide_timer is None
+
+
+def test_password_toggle_hidden_in_bek_mode(tk_root: tk.Tk) -> None:
+    """Toggle button hidden when BEK file mode is active."""
+    app = _build_app(tk_root)
+
+    # User password mode: toggle visible
+    assert app.method_var.get() == UnlockMethod.USER_PASSWORD.value
+    # (Initial pack in _build ensures it's present)
+
+    # Switch to BEK mode
+    app.method_var.set(UnlockMethod.BEK_FILE.value)
+    app._on_method_change()
+
+    # Toggle button should be forgotten (not packed)
+    # Check winfo_manager returns empty string when unpacked
+    assert app.pwd_toggle_btn.winfo_manager() == ""
+    assert app.secret_entry.cget("show") == ""  # BEK path shown in clear
+
+
+def test_password_toggle_hidden_in_recovery_password_mode(tk_root: tk.Tk) -> None:
+    """Toggle button hidden for recovery password mode."""
+    app = _build_app(tk_root)
+
+    # Switch to recovery password mode
+    app.method_var.set(UnlockMethod.RECOVERY_PASSWORD.value)
+    app._on_method_change()
+
+    # Toggle button should be forgotten
+    assert app.pwd_toggle_btn.winfo_manager() == ""
+    assert app.secret_entry.cget("show") == "*"  # recovery pwd still masked
+
+
+def test_password_toggle_resets_on_method_change_while_visible(tk_root: tk.Tk) -> None:
+    """Changing method while password is visible hides it and cancels timer."""
+    app = _build_app(tk_root)
+
+    # Show password
+    app._toggle_password_visibility()
+    assert app.pwd_visible
+
+    # Switch to BEK mode
+    app.method_var.set(UnlockMethod.BEK_FILE.value)
+    app._on_method_change()
+
+    # Password should be hidden, timer cancelled
+    assert not app.pwd_visible
+    assert app._pwd_hide_timer is None

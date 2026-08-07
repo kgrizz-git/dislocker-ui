@@ -34,6 +34,10 @@ from dislocker_ui.runner import (
 )
 from dislocker_ui.session import active_session_path_for_user, load_session
 
+__all__ = ["PWD_AUTO_HIDE_MS", "DislockerApp", "_raise_root_window", "run_app"]
+
+PWD_AUTO_HIDE_MS = 30_000
+
 
 class DislockerApp(ttk.Frame):
     """Main application frame."""
@@ -51,6 +55,8 @@ class DislockerApp(ttk.Frame):
         self.secret_var = tk.StringVar()
         self.readonly_var = tk.BooleanVar(value=True)
         self.status_var = tk.StringVar(value="")
+        self.pwd_visible = False
+        self._pwd_hide_timer: str | None = None
 
         self.pack(fill=tk.BOTH, expand=True)
         self._build()
@@ -99,6 +105,13 @@ class DislockerApp(ttk.Frame):
         self.secret_label.pack(side=tk.LEFT)
         self.secret_entry = ttk.Entry(secret_frame, textvariable=self.secret_var, show="*")
         self.secret_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
+        self.pwd_toggle_btn = ttk.Button(
+            secret_frame,
+            text="Show",
+            width=5,
+            command=self._toggle_password_visibility,
+        )
+        self.pwd_toggle_btn.pack(side=tk.LEFT, padx=(0, 6))
         self.bek_button = ttk.Button(
             secret_frame, text="Browse…", command=self._browse_bek, state=tk.DISABLED
         )
@@ -176,15 +189,60 @@ class DislockerApp(ttk.Frame):
             self.readonly_check.configure(state=tk.DISABLED)
 
     def _on_method_change(self) -> None:
-        """Toggle password vs BEK browse UI."""
-        if self.method_var.get() == UnlockMethod.BEK_FILE.value:
+        """Toggle password vs BEK browse UI; manage visibility toggle button."""
+        method = self.method_var.get()
+
+        # Clear any existing secret to prevent stale data exposure
+        self.secret_var.set("")
+
+        # Reset password visibility if currently showing
+        if self.pwd_visible:
+            self._toggle_password_visibility()
+
+        if method == UnlockMethod.BEK_FILE.value:
+            # BEK mode: show path in clear text, hide toggle button
             self.secret_label.configure(text="BEK path:")
             self.secret_entry.configure(show="")
+            self.pwd_toggle_btn.pack_forget()
             self.bek_button.configure(state=tk.NORMAL)
         else:
+            # Password modes (user or recovery): both masked, both disable BEK button
             self.secret_label.configure(text="Password:")
             self.secret_entry.configure(show="*")
             self.bek_button.configure(state=tk.DISABLED)
+
+            # Toggle button visible ONLY for user password mode
+            if method == UnlockMethod.USER_PASSWORD.value:
+                # Re-pack both buttons in correct order to fix layout after pack_forget
+                self.bek_button.pack_forget()
+                self.pwd_toggle_btn.pack(side=tk.LEFT, padx=(0, 6))
+                self.bek_button.pack(side=tk.LEFT)
+            else:
+                # Recovery password mode: hide toggle button
+                self.pwd_toggle_btn.pack_forget()
+
+    def _toggle_password_visibility(self) -> None:
+        """Toggle password field between masked and clear text."""
+        self.pwd_visible = not self.pwd_visible
+        if self.pwd_visible:
+            self.secret_entry.config(show="")
+            self.pwd_toggle_btn.config(text="Hide")
+            # Start auto-hide timer (30 seconds, fixed countdown)
+            self._pwd_hide_timer = self.master.after(PWD_AUTO_HIDE_MS, self._auto_hide_password)
+        else:
+            self.secret_entry.config(show="*")
+            self.pwd_toggle_btn.config(text="Show")
+            # Cancel timer if exists
+            if self._pwd_hide_timer is not None:
+                self.master.after_cancel(self._pwd_hide_timer)
+                self._pwd_hide_timer = None
+
+    def _auto_hide_password(self) -> None:
+        """Automatically hide password after 30-second timeout."""
+        self._pwd_hide_timer = None
+        if self.pwd_visible:
+            # Delegate to toggle to avoid state duplication
+            self._toggle_password_visibility()
 
     def _browse_bek(self) -> None:
         """Pick a .bek file."""

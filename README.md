@@ -5,7 +5,7 @@ It does **not** fork or reimplement BitLocker crypto — it shells out to an
 installed `dislocker-fuse` and then attaches/mounts the resulting filesystem
 image (NTFS via ntfs-3g, or FAT/ExFAT via system mount helpers).
 
-**Version:** see `VERSION` (currently 0.4.4).
+**Version:** see `VERSION` (currently 0.5.0).
 
 Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
@@ -169,6 +169,8 @@ real mounts.
 
 3. Select a volume (or type `/dev/diskXsY`).
 4. Choose unlock method: user password, recovery password, or `.bek` file.
+   - For user passwords, click the "Show" button to briefly reveal the password
+     in clear text (auto-hides after 30 seconds).
 5. Leave **Read-only** checked unless you need writes.
 6. Click **Mount**, then open the path under `/Volumes` (shown in the dialog /
    status line).
