@@ -2,7 +2,7 @@
 
 **Created:** 2026-08-07  
 **Updated:** 2026-08-07 (post-review + 2nd assessment cleanup)  
-**Status:** Planning  
+**Status:** Complete  
 **Target Version:** 0.5.0
 
 **Assessments:**
@@ -342,23 +342,23 @@ Add a note:
 
 ### 6. Code Review Checklist
 
-- [ ] Password defaults to masked (`show="*"`)
-- [ ] `pwd_visible` and `_pwd_hide_timer` initialized in `__init__`
-- [ ] `_pwd_hide_timer` typed as `int | None` (tkinter after() returns int)
-- [ ] Toggle button uses `self.master.after()` not `self.root.after()`
-- [ ] `_auto_hide_password` delegates to `_toggle_password_visibility` (DRY)
-- [ ] Toggle button only shown for user password field (not recovery password or BEK)
-- [ ] Toggle button uses `pack_forget()` when hidden (not just `state=DISABLED`)
-- [ ] Auto-hide timer works (30 seconds, fixed countdown)
-- [ ] Timer cancelled on manual hide or method change
-- [ ] Timer cancelled on window close (if app teardown hook added in future)
-- [ ] No logging of password visibility state changes
-- [ ] Button text "Show"/"Hide" (not emoji)
-- [ ] Layout does not break with new button (uses existing pack layout)
-- [ ] `bek_button` pack order is stable (never forgotten, so always after toggle)
-- [ ] Keyboard accessibility: relies on default `ttk.Button` behavior (Tab-focusable, Space/Return activates; untested by design)
-- [ ] All automated tests pass with ≥80% coverage
-- [ ] `test_gui.py` includes 8 new test cases covering toggle behavior
+- [x] Password defaults to masked (`show="*"`)
+- [x] `pwd_visible` and `_pwd_hide_timer` initialized in `__init__`
+- [x] `_pwd_hide_timer` typed as `int | None` (tkinter after() returns int)
+- [x] Toggle button uses `self.master.after()` not `self.root.after()`
+- [x] `_auto_hide_password` delegates to `_toggle_password_visibility` (DRY)
+- [x] Toggle button only shown for user password field (not recovery password or BEK)
+- [x] Toggle button uses `pack_forget()` when hidden (not just `state=DISABLED`)
+- [x] Auto-hide timer works (30 seconds, fixed countdown)
+- [x] Timer cancelled on manual hide or method change
+- [x] Timer cancelled on window close (if app teardown hook added in future)
+- [x] No logging of password visibility state changes
+- [x] Button text "Show"/"Hide" (not emoji)
+- [x] Layout does not break with new button (uses existing pack layout)
+- [x] `bek_button` pack order is stable (`pack_forget()` then re-packed after the toggle button in USER_PASSWORD mode)
+- [x] Keyboard accessibility: relies on default `ttk.Button` behavior (Tab-focusable, Space/Return activates; untested by design)
+- [x] All automated tests pass with ≥80% coverage
+- [x] `test_gui.py` includes 8 new test cases covering toggle behavior
 
 ## Out of Scope
 

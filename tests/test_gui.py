@@ -27,7 +27,7 @@ import pytest
 
 from dislocker_ui.deps import DepsStatus
 from dislocker_ui.disks import DiskEntry
-from dislocker_ui.gui import DislockerApp, _raise_root_window, run_app
+from dislocker_ui.gui import PWD_AUTO_HIDE_MS, DislockerApp, _raise_root_window, run_app
 from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod
 from dislocker_ui.session import MountSession
 
@@ -569,9 +569,11 @@ def test_password_toggle_schedules_auto_hide_timer(tk_root: tk.Tk) -> None:
     """Showing password schedules a 30-second auto-hide timer."""
     app = _build_app(tk_root)
 
-    app._toggle_password_visibility()
+    with patch.object(app.master, "after", wraps=app.master.after) as after:
+        app._toggle_password_visibility()
 
-    # Timer should be scheduled
+    # Timer should be scheduled with correct delay and callback
+    after.assert_called_once_with(PWD_AUTO_HIDE_MS, app._auto_hide_password)
     assert app._pwd_hide_timer is not None
     assert app.pwd_visible
 

@@ -34,6 +34,10 @@ from dislocker_ui.runner import (
 )
 from dislocker_ui.session import active_session_path_for_user, load_session
 
+__all__ = ["PWD_AUTO_HIDE_MS", "DislockerApp", "_raise_root_window", "run_app"]
+
+PWD_AUTO_HIDE_MS = 30_000
+
 
 class DislockerApp(ttk.Frame):
     """Main application frame."""
@@ -221,9 +225,7 @@ class DislockerApp(ttk.Frame):
             self.secret_entry.config(show="")
             self.pwd_toggle_btn.config(text="Hide")
             # Start auto-hide timer (30 seconds, fixed countdown)
-            if self._pwd_hide_timer is not None:
-                self.master.after_cancel(self._pwd_hide_timer)
-            self._pwd_hide_timer = self.master.after(30000, self._auto_hide_password)
+            self._pwd_hide_timer = self.master.after(PWD_AUTO_HIDE_MS, self._auto_hide_password)
         else:
             self.secret_entry.config(show="*")
             self.pwd_toggle_btn.config(text="Show")

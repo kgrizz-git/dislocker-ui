@@ -148,7 +148,9 @@ paseo provider ls
 paseo provider models opencode
 
 # Create an agent with a specific model
-paseo run --provider opencode --model opencode/longcat-2.0-free --mode full-access "<review prompt>"
+# Note: Use --mode plan for read-only reviews (the default mode is not read-only).
+# Write-enabled modes allow file edits and should only be used against trusted checkouts with explicit approval.
+paseo run --provider opencode --model opencode/longcat-2.0-free --mode plan "<review prompt>"
 
 # Check agent logs after completion
 paseo logs <agent-id>
