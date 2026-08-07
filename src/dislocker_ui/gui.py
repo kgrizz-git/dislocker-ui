@@ -56,7 +56,7 @@ class DislockerApp(ttk.Frame):
         self.readonly_var = tk.BooleanVar(value=True)
         self.status_var = tk.StringVar(value="")
         self.pwd_visible = False
-        self._pwd_hide_timer: int | None = None
+        self._pwd_hide_timer: str | None = None
 
         self.pack(fill=tk.BOTH, expand=True)
         self._build()
@@ -191,6 +191,9 @@ class DislockerApp(ttk.Frame):
     def _on_method_change(self) -> None:
         """Toggle password vs BEK browse UI; manage visibility toggle button."""
         method = self.method_var.get()
+
+        # Clear any existing secret to prevent stale data exposure
+        self.secret_var.set("")
 
         # Reset password visibility if currently showing
         if self.pwd_visible:
