@@ -15,7 +15,7 @@ Version numbers match `VERSION` / SemVer with the public changelog.
   writable directory rejection, writable `.pyc` rejection, writable
   `__pycache__` rejection, writable `.so` rejection, broken-symlink OSError
   handling, system-managed root-owned skip, user-owned system-named dir scan,
-  non-code directory exclusion).
+  non-code directory exclusion, pruned excluded-directory descendants).
 - Tests for `_discover_deps_for_euid` (root uses privileged deps, non-root
   uses PATH-based discovery).
 - Test for `prepare_elevation_paths` integration: verifies

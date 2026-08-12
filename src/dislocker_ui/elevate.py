@@ -242,37 +242,46 @@ _NON_CODE_DIRS = frozenset(
 
 
 def _assert_no_writable_py_files(src_root: Path) -> None:
-    """Refuse elevation if any .py, .pyc, directory, or __pycache__ under *src_root* is writable.
+    """Refuse elevation if any .py, .pyc, .so, directory, or __pycache__ under *src_root* is writable.
 
     Root imports these modules via PYTHONPATH; a writable source file, bytecode
     file, or directory is a trojan vector.  Skips the recursive scan for
     pip-installed packages (site-packages / dist-packages) where the package
     manager controls file modes and scanning the entire directory would be
     prohibitively slow.  Known non-code directories (build artifacts, caches,
-    VCS metadata) are excluded to avoid false positives on ``pip install -e``
-    checkouts.
+    VCS metadata) are pruned before descent to avoid false positives on
+    ``pip install -e`` checkouts.
     """
     if _is_system_managed_install(src_root):
         return
-    for entry in src_root.rglob("*"):
+    src_str = str(src_root)
+    for dirpath_str, dirnames, filenames in os.walk(src_str, topdown=True):
+        dirpath = Path(dirpath_str)
+        # Prune excluded directories before descent.
+        dirnames[:] = [
+            d for d in dirnames if d not in _NON_CODE_DIRS and not d.endswith(".egg-info")
+        ]
         try:
-            mode = entry.stat().st_mode
+            mode = dirpath.stat().st_mode
         except OSError:
-            continue
-        if not mode & 0o022:
-            continue
-        if entry.is_dir():
-            if entry.name in _NON_CODE_DIRS or entry.name.endswith(".egg-info"):
+            pass
+        else:
+            if mode & 0o022 and dirpath != src_root:
+                raise RunnerError(
+                    f"Refusing to elevate: directory {dirpath} is group/world-writable "
+                    f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {dirpath}"
+                )
+        for name in filenames:
+            entry = dirpath / name
+            try:
+                mode = entry.stat().st_mode
+            except OSError:
                 continue
-            raise RunnerError(
-                f"Refusing to elevate: directory {entry} is group/world-writable "
-                f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {entry}"
-            )
-        if entry.suffix in (".py", ".pyc", ".so"):
-            raise RunnerError(
-                f"Refusing to elevate: {entry} is group/world-writable "
-                f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {entry}"
-            )
+            if mode & 0o022 and entry.suffix in (".py", ".pyc", ".so"):
+                raise RunnerError(
+                    f"Refusing to elevate: {entry} is group/world-writable "
+                    f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {entry}"
+                )
 
 
 def _is_system_managed_install(src_root: Path) -> bool:

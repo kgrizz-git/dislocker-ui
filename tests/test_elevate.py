@@ -617,3 +617,21 @@ def test_assert_no_writable_py_files_skips_non_code_dirs(tmp_path: Path, dirname
     ok.write_text("", encoding="utf-8")
     ok.chmod(0o644)
     _assert_no_writable_py_files(root)
+
+
+def test_assert_no_writable_py_files_prunes_excluded_dir_descendants(
+    tmp_path: Path,
+) -> None:
+    """Writable files inside an excluded directory (.git) are not checked."""
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "src"
+    git_dir = root / ".git" / "objects"
+    git_dir.mkdir(parents=True)
+    bad = git_dir / "bad.py"
+    bad.write_text("", encoding="utf-8")
+    bad.chmod(0o664)
+    ok = root / "mod.py"
+    ok.write_text("", encoding="utf-8")
+    ok.chmod(0o644)
+    _assert_no_writable_py_files(root)

@@ -36,7 +36,7 @@ Elevated GUI mounts intentionally support physical BitLocker devices
 | macOS | Yes | Target platform |
 | Python 3.10+ with tkinter | Yes | GUI |
 | [dislocker](https://github.com/Aorimn/dislocker) | Yes | BitLocker unlock (`dislocker-fuse`) |
-| [macFUSE](https://osxfuse.github.io/) | Yes | Required for dislocker + ntfs-3g options used here (`allow_other` / `local` / uid). |
+| [macFUSE](https://osxfuse.github.io/) ≥4.10 | Yes | Required for dislocker + ntfs-3g options used here (`allow_other` / `local` / uid). Must provide a `fuse3` pkg-config entry. |
 | **`ntfs-3g`** | **Yes** (for NTFS) | RO and RW NTFS mounts (kernel `mount_ntfs` is missing on recent macOS). FAT/ExFAT BitLocker To Go uses system `mount_msdos` / `mount_exfat`. |
 
 This project does **not** bundle FUSE or ntfs-3g (system extensions / installers).
