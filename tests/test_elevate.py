@@ -490,7 +490,12 @@ def test_assert_no_writable_py_files_scans_subdirectories(tmp_path: Path) -> Non
 
 
 @pytest.mark.parametrize("dirname", ["site-packages", "dist-packages"])
-def test_assert_no_writable_py_files_skips_system_managed(tmp_path: Path, dirname: str) -> None:
+def test_assert_no_writable_py_files_skips_root_owned_system_managed(
+    tmp_path: Path, dirname: str
+) -> None:
+    """Root-owned site-packages / dist-packages is exempt from the scan."""
+    from unittest.mock import patch
+
     from dislocker_ui.elevate import _assert_no_writable_py_files
 
     root = tmp_path / dirname
@@ -498,4 +503,67 @@ def test_assert_no_writable_py_files_skips_system_managed(tmp_path: Path, dirnam
     bad = root / "mod.py"
     bad.write_text("", encoding="utf-8")
     bad.chmod(0o664)
-    _assert_no_writable_py_files(root)
+    with patch("dislocker_ui.elevate._is_system_managed_install", return_value=True):
+        _assert_no_writable_py_files(root)
+
+
+@pytest.mark.parametrize("dirname", ["site-packages", "dist-packages"])
+def test_assert_no_writable_py_files_scans_user_owned_system_named_dir(
+    tmp_path: Path, dirname: str
+) -> None:
+    """User-owned directory merely named site-packages is NOT exempt."""
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / dirname
+    root.mkdir()
+    bad = root / "mod.py"
+    bad.write_text("", encoding="utf-8")
+    bad.chmod(0o664)
+    with pytest.raises(RunnerError, match="writable"):
+        _assert_no_writable_py_files(root)
+
+
+def test_assert_no_writable_py_files_rejects_writable_directory(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "src"
+    sub = root / "pkg"
+    sub.mkdir(parents=True)
+    sub.chmod(0o775)
+    ok = sub / "mod.py"
+    ok.write_text("", encoding="utf-8")
+    ok.chmod(0o644)
+    with pytest.raises(RunnerError, match=r"directory.*writable"):
+        _assert_no_writable_py_files(root)
+
+
+def test_assert_no_writable_py_files_rejects_writable_pyc(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "pkg"
+    root.mkdir()
+    bad = root / "mod.pyc"
+    bad.write_bytes(b"\x00")
+    bad.chmod(0o664)
+    with pytest.raises(RunnerError, match="writable"):
+        _assert_no_writable_py_files(root)
+
+
+def test_assert_no_writable_py_files_rejects_writable_pycache(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "pkg"
+    cache = root / "__pycache__"
+    cache.mkdir(parents=True)
+    cache.chmod(0o775)
+    with pytest.raises(RunnerError, match="writable"):
+        _assert_no_writable_py_files(root)
+
+
+def test_is_system_managed_install_requires_root_ownership(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _is_system_managed_install
+
+    assert _is_system_managed_install(tmp_path / "other") is False
+    sp = tmp_path / "site-packages"
+    sp.mkdir()
+    assert _is_system_managed_install(sp) is False
