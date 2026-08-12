@@ -11,7 +11,7 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
 ### Security
 
-- Elevation preflight now rejects group/world-writable `.py`/`.pyc` files,
+- Elevation preflight now rejects group/world-writable `.py`/`.pyc`/`.so` files,
   `__pycache__`, and writable descendant directories under the PYTHONPATH
   source root, preventing a trojan-module attack when an attacker shares
   group-write on the checkout. Known non-code directories (build artifacts,

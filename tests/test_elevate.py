@@ -560,6 +560,32 @@ def test_assert_no_writable_py_files_rejects_writable_pycache(tmp_path: Path) ->
         _assert_no_writable_py_files(root)
 
 
+def test_assert_no_writable_py_files_rejects_writable_so(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "pkg"
+    root.mkdir()
+    bad = root / "native.so"
+    bad.write_bytes(b"\x00")
+    bad.chmod(0o664)
+    with pytest.raises(RunnerError, match="writable"):
+        _assert_no_writable_py_files(root)
+
+
+def test_assert_no_writable_py_files_handles_stat_oserror(tmp_path: Path) -> None:
+    """A broken symlink (target deleted) does not abort the scan."""
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "pkg"
+    root.mkdir()
+    broken = root / "broken.py"
+    broken.symlink_to(tmp_path / "no-such-file")
+    ok = root / "mod.py"
+    ok.write_text("", encoding="utf-8")
+    ok.chmod(0o644)
+    _assert_no_writable_py_files(root)
+
+
 def test_is_system_managed_install_requires_root_ownership(tmp_path: Path) -> None:
     from dislocker_ui.elevate import _is_system_managed_install
 

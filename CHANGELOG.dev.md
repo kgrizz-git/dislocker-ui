@@ -13,8 +13,9 @@ Version numbers match `VERSION` / SemVer with the public changelog.
 - Tests for `_assert_no_writable_py_files` (group-writable, world-writable,
   non-py passthrough, error message includes path, recursive subdirectory scan,
   writable directory rejection, writable `.pyc` rejection, writable
-  `__pycache__` rejection, system-managed root-owned skip, user-owned
-  system-named dir scan).
+  `__pycache__` rejection, writable `.so` rejection, broken-symlink OSError
+  handling, system-managed root-owned skip, user-owned system-named dir scan,
+  non-code directory exclusion).
 - Tests for `_discover_deps_for_euid` (root uses privileged deps, non-root
   uses PATH-based discovery).
 - Test for `prepare_elevation_paths` integration: verifies

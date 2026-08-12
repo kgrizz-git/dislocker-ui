@@ -255,9 +255,10 @@ def _assert_no_writable_py_files(src_root: Path) -> None:
     if _is_system_managed_install(src_root):
         return
     for entry in src_root.rglob("*"):
-        if not entry.exists():
+        try:
+            mode = entry.stat().st_mode
+        except OSError:
             continue
-        mode = entry.stat().st_mode
         if not mode & 0o022:
             continue
         if entry.is_dir():
@@ -267,7 +268,7 @@ def _assert_no_writable_py_files(src_root: Path) -> None:
                 f"Refusing to elevate: directory {entry} is group/world-writable "
                 f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {entry}"
             )
-        if entry.suffix in (".py", ".pyc") or entry.name == "__pycache__":
+        if entry.suffix in (".py", ".pyc", ".so"):
             raise RunnerError(
                 f"Refusing to elevate: {entry} is group/world-writable "
                 f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {entry}"
