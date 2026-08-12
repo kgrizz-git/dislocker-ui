@@ -257,31 +257,43 @@ def _assert_no_writable_py_files(src_root: Path) -> None:
     src_str = str(src_root)
     for dirpath_str, dirnames, filenames in os.walk(src_str, topdown=True):
         dirpath = Path(dirpath_str)
-        # Prune excluded directories before descent.
         dirnames[:] = [
             d for d in dirnames if d not in _NON_CODE_DIRS and not d.endswith(".egg-info")
         ]
+        _check_dir_writable(dirpath, src_root)
+        _check_files_writable(dirpath, filenames)
+
+
+def _check_dir_writable(dirpath: Path, src_root: Path) -> None:
+    """Raise RunnerError if *dirpath* is group/world-writable (except src_root itself)."""
+    if dirpath == src_root:
+        return
+    try:
+        mode = dirpath.stat().st_mode
+    except OSError:
+        return
+    if mode & 0o022:
+        raise RunnerError(
+            f"Refusing to elevate: directory {dirpath} is group/world-writable "
+            f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {dirpath}"
+        )
+
+
+def _check_files_writable(dirpath: Path, filenames: list[str]) -> None:
+    """Raise RunnerError if any .py/.pyc/.so in *filenames* is group/world-writable."""
+    for name in filenames:
+        entry = dirpath / name
+        if entry.suffix not in (".py", ".pyc", ".so"):
+            continue
         try:
-            mode = dirpath.stat().st_mode
+            mode = entry.stat().st_mode
         except OSError:
-            pass
-        else:
-            if mode & 0o022 and dirpath != src_root:
-                raise RunnerError(
-                    f"Refusing to elevate: directory {dirpath} is group/world-writable "
-                    f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {dirpath}"
-                )
-        for name in filenames:
-            entry = dirpath / name
-            try:
-                mode = entry.stat().st_mode
-            except OSError:
-                continue
-            if mode & 0o022 and entry.suffix in (".py", ".pyc", ".so"):
-                raise RunnerError(
-                    f"Refusing to elevate: {entry} is group/world-writable "
-                    f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {entry}"
-                )
+            continue
+        if mode & 0o022:
+            raise RunnerError(
+                f"Refusing to elevate: {entry} is group/world-writable "
+                f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {entry}"
+            )
 
 
 def _is_system_managed_install(src_root: Path) -> bool:
