@@ -11,10 +11,13 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
 ### Security
 
-- Elevation preflight now rejects group/world-writable `.py` files under the
-  PYTHONPATH source root, preventing a trojan-module attack when an attacker
-  shares group-write on the checkout. Skips the recursive scan for pip-installed
-  packages (site-packages) where the package manager controls file modes.
+- Elevation preflight now rejects group/world-writable `.py`/`.pyc` files,
+  `__pycache__`, and writable descendant directories under the PYTHONPATH
+  source root, preventing a trojan-module attack when an attacker shares
+  group-write on the checkout. Known non-code directories (build artifacts,
+  caches, VCS metadata) are excluded to avoid false positives. Skips the
+  recursive scan for pip-installed packages (site-packages) where the package
+  manager controls file modes.
 - When launched as root (`sudo ./run.sh`), the GUI uses fixed root-managed
   executable paths (`discover_privileged_deps`) instead of PATH-based
   discovery, closing a PATH injection vector for mount tools.

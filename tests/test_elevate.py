@@ -567,3 +567,27 @@ def test_is_system_managed_install_requires_root_ownership(tmp_path: Path) -> No
     sp = tmp_path / "site-packages"
     sp.mkdir()
     assert _is_system_managed_install(sp) is False
+
+
+@pytest.mark.parametrize(
+    "dirname",
+    [
+        "dislocker_ui.egg-info",
+        "build",
+        "dist",
+        ".pytest_cache",
+        ".git",
+        "tmp",
+    ],
+)
+def test_assert_no_writable_py_files_skips_non_code_dirs(tmp_path: Path, dirname: str) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "src"
+    d = root / dirname
+    d.mkdir(parents=True)
+    d.chmod(0o775)
+    ok = root / "mod.py"
+    ok.write_text("", encoding="utf-8")
+    ok.chmod(0o644)
+    _assert_no_writable_py_files(root)

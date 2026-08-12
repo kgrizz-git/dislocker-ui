@@ -227,6 +227,20 @@ def assert_safe_path_for_elevation(path: Path, *, label: str) -> None:
         raise RunnerError(f"Refusing to elevate: {label} is group/world-writable ({path})")
 
 
+_NON_CODE_DIRS = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".pytest_cache",
+        ".tox",
+        ".eggs",
+        "build",
+        "dist",
+        "tmp",
+    }
+)
+
+
 def _assert_no_writable_py_files(src_root: Path) -> None:
     """Refuse elevation if any .py, .pyc, directory, or __pycache__ under *src_root* is writable.
 
@@ -234,7 +248,9 @@ def _assert_no_writable_py_files(src_root: Path) -> None:
     file, or directory is a trojan vector.  Skips the recursive scan for
     pip-installed packages (site-packages / dist-packages) where the package
     manager controls file modes and scanning the entire directory would be
-    prohibitively slow.
+    prohibitively slow.  Known non-code directories (build artifacts, caches,
+    VCS metadata) are excluded to avoid false positives on ``pip install -e``
+    checkouts.
     """
     if _is_system_managed_install(src_root):
         return
@@ -242,17 +258,20 @@ def _assert_no_writable_py_files(src_root: Path) -> None:
         if not entry.exists():
             continue
         mode = entry.stat().st_mode
-        if mode & 0o022:
-            if entry.is_dir():
-                raise RunnerError(
-                    f"Refusing to elevate: directory {entry} is group/world-writable "
-                    f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {entry}"
-                )
-            if entry.suffix in (".py", ".pyc") or entry.name == "__pycache__":
-                raise RunnerError(
-                    f"Refusing to elevate: {entry} is group/world-writable "
-                    f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {entry}"
-                )
+        if not mode & 0o022:
+            continue
+        if entry.is_dir():
+            if entry.name in _NON_CODE_DIRS or entry.name.endswith(".egg-info"):
+                continue
+            raise RunnerError(
+                f"Refusing to elevate: directory {entry} is group/world-writable "
+                f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {entry}"
+            )
+        if entry.suffix in (".py", ".pyc") or entry.name == "__pycache__":
+            raise RunnerError(
+                f"Refusing to elevate: {entry} is group/world-writable "
+                f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {entry}"
+            )
 
 
 def _is_system_managed_install(src_root: Path) -> bool:
