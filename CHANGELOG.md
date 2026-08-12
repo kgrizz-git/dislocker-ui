@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.5.1] - 2026-08-12
+
+### Security
+
+- Elevation preflight now rejects group/world-writable `.py` files under the
+  PYTHONPATH source root, preventing a trojan-module attack when an attacker
+  shares group-write on the checkout. Skips the recursive scan for pip-installed
+  packages (site-packages) where the package manager controls file modes.
+- When launched as root (`sudo ./run.sh`), the GUI uses fixed root-managed
+  executable paths (`discover_privileged_deps`) instead of PATH-based
+  discovery, closing a PATH injection vector for mount tools.
+
+### Changed
+
+- Root-launched GUI (`sudo ./run.sh`) now only trusts dislocker-fuse and
+  ntfs-3g from root-managed locations (`/usr/local/sbin`, `/opt/local/sbin`).
+  User-owned Homebrew installs remain available for the unprivileged GUI and
+  the osascript elevation preflight, but are not executed as root. If tools are
+  missing, the GUI shows an actionable message pointing at
+  `scripts/install-root-deps.sh`.
+
 ## [0.5.0] - 2026-08-07
 
 ### Added

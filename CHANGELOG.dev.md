@@ -6,6 +6,20 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.5.1] - 2026-08-12
+
+### Added
+
+- Tests for `_assert_no_writable_py_files` (group-writable, world-writable,
+  non-py passthrough, error message includes path, recursive subdirectory scan,
+  system-managed site-packages skip).
+- Tests for `_discover_deps_for_euid` (root uses privileged deps, non-root
+  uses PATH-based discovery).
+- Test for `prepare_elevation_paths` integration: verifies
+  `_assert_no_writable_py_files` is called with the PYTHONPATH source root.
+- Test for GUI init under root: verifies `DislockerApp` uses
+  `discover_privileged_deps` and not `discover_deps` when euid==0.
+
 ## [0.4.4] - 2026-08-06
 
 ### Changed

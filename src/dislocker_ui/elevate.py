@@ -164,6 +164,13 @@ def prepare_elevation_paths() -> tuple[Path, Path]:
     # imports from and its parent against symlink/world-writable tampering.
     assert_safe_path_for_elevation(src_root, label="package src")
     assert_safe_path_for_elevation(package_dir, label="package dir")
+    # Reject group/world-writable .py files: an attacker with group-write on
+    # the checkout could trojan a module that root imports via PYTHONPATH.
+    # Scan src_root (the actual PYTHONPATH entry), not just package_dir, so a
+    # writable sibling like src/os.py is also caught.  Skip for pip-installed
+    # packages where site-packages is the root (pip controls file modes, and
+    # scanning site-packages recursively would be prohibitively slow).
+    _assert_no_writable_py_files(src_root)
     # These temp files live in the persistent Application Support dir (not a
     # reboot-cleared temp dir) so the child can confine them; sweep any left
     # behind by a killed run first — a stale request file can hold a secret.
@@ -218,6 +225,34 @@ def assert_safe_path_for_elevation(path: Path, *, label: str) -> None:
     mode = path.stat().st_mode
     if mode & 0o022:
         raise RunnerError(f"Refusing to elevate: {label} is group/world-writable ({path})")
+
+
+def _assert_no_writable_py_files(src_root: Path) -> None:
+    """Refuse elevation if any .py file under *src_root* is group/world-writable.
+
+    Root imports these modules via PYTHONPATH; a writable .py is a trojan vector.
+    Skips the recursive scan for pip-installed packages (site-packages /
+    dist-packages) where the package manager controls file modes and scanning
+    the entire directory would be prohibitively slow.
+    """
+    if _is_system_managed_install(src_root):
+        return
+    for py_file in src_root.rglob("*.py"):
+        mode = py_file.stat().st_mode
+        if mode & 0o022:
+            raise RunnerError(
+                f"Refusing to elevate: {py_file} is group/world-writable "
+                f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {py_file}"
+            )
+
+
+def _is_system_managed_install(src_root: Path) -> bool:
+    """True when *src_root* is a pip-managed site-packages directory.
+
+    In that case the package manager owns file integrity and a recursive scan
+    would be too slow to run before every elevation.
+    """
+    return src_root.name in ("site-packages", "dist-packages")
 
 
 def validate_volume_path(volume: str) -> None:

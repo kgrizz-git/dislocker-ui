@@ -381,3 +381,121 @@ def test_request_json_secret_is_last_key(tmp_path: Path) -> None:
         assert oct(path.stat().st_mode & 0o777) == "0o600"
     finally:
         path.unlink(missing_ok=True)
+
+
+def test_prepare_elevation_paths_checks_writable_py_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """prepare_elevation_paths calls _assert_no_writable_py_files on the package dir."""
+    from dislocker_ui.elevate import prepare_elevation_paths
+
+    support = tmp_path / "Application Support" / "dislocker-ui"
+    support.mkdir(parents=True)
+    monkeypatch.setattr(
+        "dislocker_ui.session.default_session_path",
+        lambda: support / "active_session.json",
+    )
+    state = tmp_path / "root-state"
+    monkeypatch.setattr(
+        "dislocker_ui.elevate.root_session_path",
+        lambda uid: state / str(uid) / "active_session.json",
+    )
+    monkeypatch.setattr(
+        "dislocker_ui.elevate.root_log_path",
+        lambda uid: state / str(uid) / "operation.log",
+    )
+
+    def _safe(path: Path, *, label: str) -> None:
+        return None
+
+    with (
+        patch("dislocker_ui.elevate.assert_safe_path_for_elevation", side_effect=_safe),
+        patch("dislocker_ui.elevate._assert_no_writable_py_files") as check_py,
+    ):
+        prepare_elevation_paths()
+    check_py.assert_called_once()
+    called_dir = check_py.call_args.args[0]
+    assert called_dir.name == "src"
+
+
+def test_assert_no_writable_py_files_ok(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    ok = pkg / "mod.py"
+    ok.write_text("", encoding="utf-8")
+    ok.chmod(0o644)
+    _assert_no_writable_py_files(pkg)
+
+
+def test_assert_no_writable_py_files_group_writable(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    bad = pkg / "mod.py"
+    bad.write_text("", encoding="utf-8")
+    bad.chmod(0o664)
+    with pytest.raises(RunnerError, match="writable"):
+        _assert_no_writable_py_files(pkg)
+
+
+def test_assert_no_writable_py_files_world_writable(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    bad = pkg / "mod.py"
+    bad.write_text("", encoding="utf-8")
+    bad.chmod(0o646)
+    with pytest.raises(RunnerError, match="writable"):
+        _assert_no_writable_py_files(pkg)
+
+
+def test_assert_no_writable_py_files_skips_non_py(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    non_py = pkg / "data.txt"
+    non_py.write_text("", encoding="utf-8")
+    non_py.chmod(0o666)
+    _assert_no_writable_py_files(pkg)
+
+
+def test_assert_no_writable_py_files_error_includes_path(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    bad = pkg / "mod.py"
+    bad.write_text("", encoding="utf-8")
+    bad.chmod(0o664)
+    with pytest.raises(RunnerError, match=str(bad)):
+        _assert_no_writable_py_files(pkg)
+
+
+def test_assert_no_writable_py_files_scans_subdirectories(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "src"
+    sub = root / "dislocker_ui"
+    sub.mkdir(parents=True)
+    bad = sub / "mod.py"
+    bad.write_text("", encoding="utf-8")
+    bad.chmod(0o664)
+    with pytest.raises(RunnerError, match="writable"):
+        _assert_no_writable_py_files(root)
+
+
+@pytest.mark.parametrize("dirname", ["site-packages", "dist-packages"])
+def test_assert_no_writable_py_files_skips_system_managed(tmp_path: Path, dirname: str) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / dirname
+    root.mkdir()
+    bad = root / "mod.py"
+    bad.write_text("", encoding="utf-8")
+    bad.chmod(0o664)
+    _assert_no_writable_py_files(root)
