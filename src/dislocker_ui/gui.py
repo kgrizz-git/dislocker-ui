@@ -17,6 +17,7 @@ Requirements:
 
 from __future__ import annotations
 
+import os
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -39,6 +40,20 @@ __all__ = ["PWD_AUTO_HIDE_MS", "DislockerApp", "_raise_root_window", "run_app"]
 PWD_AUTO_HIDE_MS = 30_000
 
 
+def _discover_deps_for_euid() -> DepsStatus:
+    """Use trusted fixed paths when running as root; PATH-based discovery otherwise.
+
+    When ``sudo ./run.sh`` launches the GUI as root, ``shutil.which`` follows
+    the caller's effective PATH which may include attacker-writable directories.
+    The privileged child already uses :func:`discover_privileged_deps`; mirror
+    that for the root-GUI path so mount tools always come from root-managed
+    locations.
+    """
+    if os.geteuid() == 0:
+        return discover_privileged_deps()
+    return discover_deps()
+
+
 class DislockerApp(ttk.Frame):
     """Main application frame."""
 
@@ -46,7 +61,7 @@ class DislockerApp(ttk.Frame):
         """Build the main frame and load initial deps, disks, and session state."""
         super().__init__(master, padding=12)
         self.master = master
-        self.deps: DepsStatus = discover_deps()
+        self.deps: DepsStatus = _discover_deps_for_euid()
         self.disk_entries: list[DiskEntry] = []
         self._busy = False
 
@@ -148,7 +163,7 @@ class DislockerApp(ttk.Frame):
 
     def _recheck_deps(self) -> None:
         """Re-run dependency discovery."""
-        self.deps = discover_deps()
+        self.deps = _discover_deps_for_euid()
         self._refresh_deps_label()
         self._update_rw_hint()
         self.log("Dependency check refreshed")

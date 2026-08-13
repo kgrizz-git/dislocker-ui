@@ -652,3 +652,40 @@ def test_password_toggle_resets_on_method_change_while_visible(tk_root: tk.Tk) -
     # Password should be hidden, timer cancelled
     assert not app.pwd_visible
     assert app._pwd_hide_timer is None
+
+
+def test_discover_deps_for_euid_root() -> None:
+    from dislocker_ui.gui import _discover_deps_for_euid
+
+    expected = _core_deps()
+    with (
+        patch("dislocker_ui.gui.os.geteuid", return_value=0),
+        patch("dislocker_ui.gui.discover_privileged_deps", return_value=expected),
+    ):
+        assert _discover_deps_for_euid() is expected
+
+
+def test_discover_deps_for_euid_non_root() -> None:
+    from dislocker_ui.gui import _discover_deps_for_euid
+
+    expected = _core_deps()
+    with (
+        patch("dislocker_ui.gui.os.geteuid", return_value=501),
+        patch("dislocker_ui.gui.discover_deps", return_value=expected),
+    ):
+        assert _discover_deps_for_euid() is expected
+
+
+def test_app_init_uses_privileged_deps_when_root(tk_root: tk.Tk) -> None:
+    """When euid==0, DislockerApp uses discover_privileged_deps, not discover_deps."""
+    deps = _core_deps()
+    with (
+        patch("dislocker_ui.gui.os.geteuid", return_value=0),
+        patch("dislocker_ui.gui.discover_privileged_deps", return_value=deps) as priv,
+        patch("dislocker_ui.gui.discover_deps") as unpriv,
+        patch("dislocker_ui.gui.list_disk_entries", return_value=_sample_disks()),
+        patch("dislocker_ui.gui.load_session", return_value=None),
+    ):
+        DislockerApp(tk_root)
+    priv.assert_called_once()
+    unpriv.assert_not_called()

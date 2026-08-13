@@ -9,7 +9,8 @@ Overall purpose:
 
 Inputs:
   MountRequest (volume, unlock method, credentials, readonly).
-  DepsStatus from deps.discover_deps().
+  DepsStatus (provided by the caller; privileged discovery is used when
+  running as root).
 
 Outputs:
   MountSession on success; raised RunnerError on failure.

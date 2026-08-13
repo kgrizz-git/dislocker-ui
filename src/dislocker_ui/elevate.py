@@ -164,6 +164,13 @@ def prepare_elevation_paths() -> tuple[Path, Path]:
     # imports from and its parent against symlink/world-writable tampering.
     assert_safe_path_for_elevation(src_root, label="package src")
     assert_safe_path_for_elevation(package_dir, label="package dir")
+    # Reject group/world-writable .py files: an attacker with group-write on
+    # the checkout could trojan a module that root imports via PYTHONPATH.
+    # Scan src_root (the actual PYTHONPATH entry), not just package_dir, so a
+    # writable sibling like src/os.py is also caught.  Skip for pip-installed
+    # packages where site-packages is the root (pip controls file modes, and
+    # scanning site-packages recursively would be prohibitively slow).
+    _assert_no_writable_py_files(src_root)
     # These temp files live in the persistent Application Support dir (not a
     # reboot-cleared temp dir) so the child can confine them; sweep any left
     # behind by a killed run first — a stale request file can hold a secret.
@@ -218,6 +225,90 @@ def assert_safe_path_for_elevation(path: Path, *, label: str) -> None:
     mode = path.stat().st_mode
     if mode & 0o022:
         raise RunnerError(f"Refusing to elevate: {label} is group/world-writable ({path})")
+
+
+_NON_CODE_DIRS = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".pytest_cache",
+        ".tox",
+        ".eggs",
+        "build",
+        "dist",
+        "tmp",
+    }
+)
+
+
+def _assert_no_writable_py_files(src_root: Path) -> None:
+    """Refuse elevation if any .py, .pyc, .so, directory, or __pycache__ under *src_root* is writable.
+
+    Root imports these modules via PYTHONPATH; a writable source file, bytecode
+    file, or directory is a trojan vector.  Skips the recursive scan for
+    pip-installed packages (site-packages / dist-packages) where the package
+    manager controls file modes and scanning the entire directory would be
+    prohibitively slow.  Known non-code directories (build artifacts, caches,
+    VCS metadata) are pruned before descent to avoid false positives on
+    ``pip install -e`` checkouts.
+    """
+    if _is_system_managed_install(src_root):
+        return
+    src_str = str(src_root)
+    for dirpath_str, dirnames, filenames in os.walk(src_str, topdown=True):
+        dirpath = Path(dirpath_str)
+        dirnames[:] = [
+            d for d in dirnames if d not in _NON_CODE_DIRS and not d.endswith(".egg-info")
+        ]
+        _check_dir_writable(dirpath, src_root)
+        _check_files_writable(dirpath, filenames)
+
+
+def _check_dir_writable(dirpath: Path, src_root: Path) -> None:
+    """Raise RunnerError if *dirpath* is group/world-writable (except src_root itself)."""
+    if dirpath == src_root:
+        return
+    try:
+        mode = dirpath.stat().st_mode
+    except OSError:
+        return
+    if mode & 0o022:
+        raise RunnerError(
+            f"Refusing to elevate: directory {dirpath} is group/world-writable "
+            f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {dirpath}"
+        )
+
+
+def _check_files_writable(dirpath: Path, filenames: list[str]) -> None:
+    """Raise RunnerError if any .py/.pyc/.so in *filenames* is group/world-writable."""
+    for name in filenames:
+        entry = dirpath / name
+        if entry.suffix not in (".py", ".pyc", ".so"):
+            continue
+        try:
+            mode = entry.stat().st_mode
+        except OSError:
+            continue
+        if mode & 0o022:
+            raise RunnerError(
+                f"Refusing to elevate: {entry} is group/world-writable "
+                f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {entry}"
+            )
+
+
+def _is_system_managed_install(src_root: Path) -> bool:
+    """True when *src_root* is a root-owned pip-managed site-packages directory.
+
+    In that case the package manager owns file integrity and a recursive scan
+    would be too slow to run before every elevation.  A user-controlled
+    directory merely named ``site-packages`` is not exempt.
+    """
+    if src_root.name not in ("site-packages", "dist-packages"):
+        return False
+    try:
+        return src_root.stat().st_uid == 0
+    except OSError:
+        return False
 
 
 def validate_volume_path(volume: str) -> None:

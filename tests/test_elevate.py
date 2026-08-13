@@ -381,3 +381,257 @@ def test_request_json_secret_is_last_key(tmp_path: Path) -> None:
         assert oct(path.stat().st_mode & 0o777) == "0o600"
     finally:
         path.unlink(missing_ok=True)
+
+
+def test_prepare_elevation_paths_checks_writable_py_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """prepare_elevation_paths calls _assert_no_writable_py_files on the package dir."""
+    from dislocker_ui.elevate import prepare_elevation_paths
+
+    support = tmp_path / "Application Support" / "dislocker-ui"
+    support.mkdir(parents=True)
+    monkeypatch.setattr(
+        "dislocker_ui.session.default_session_path",
+        lambda: support / "active_session.json",
+    )
+    state = tmp_path / "root-state"
+    monkeypatch.setattr(
+        "dislocker_ui.elevate.root_session_path",
+        lambda uid: state / str(uid) / "active_session.json",
+    )
+    monkeypatch.setattr(
+        "dislocker_ui.elevate.root_log_path",
+        lambda uid: state / str(uid) / "operation.log",
+    )
+
+    def _safe(path: Path, *, label: str) -> None:
+        return None
+
+    with (
+        patch("dislocker_ui.elevate.assert_safe_path_for_elevation", side_effect=_safe),
+        patch("dislocker_ui.elevate._assert_no_writable_py_files") as check_py,
+    ):
+        prepare_elevation_paths()
+    check_py.assert_called_once()
+    called_dir = check_py.call_args.args[0]
+    assert called_dir.name == "src"
+
+
+def test_assert_no_writable_py_files_ok(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    ok = pkg / "mod.py"
+    ok.write_text("", encoding="utf-8")
+    ok.chmod(0o644)
+    _assert_no_writable_py_files(pkg)
+
+
+def test_assert_no_writable_py_files_group_writable(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    bad = pkg / "mod.py"
+    bad.write_text("", encoding="utf-8")
+    bad.chmod(0o664)
+    with pytest.raises(RunnerError, match="writable"):
+        _assert_no_writable_py_files(pkg)
+
+
+def test_assert_no_writable_py_files_world_writable(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    bad = pkg / "mod.py"
+    bad.write_text("", encoding="utf-8")
+    bad.chmod(0o646)
+    with pytest.raises(RunnerError, match="writable"):
+        _assert_no_writable_py_files(pkg)
+
+
+def test_assert_no_writable_py_files_skips_non_py(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    non_py = pkg / "data.txt"
+    non_py.write_text("", encoding="utf-8")
+    non_py.chmod(0o666)
+    _assert_no_writable_py_files(pkg)
+
+
+def test_assert_no_writable_py_files_error_includes_path(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    bad = pkg / "mod.py"
+    bad.write_text("", encoding="utf-8")
+    bad.chmod(0o664)
+    with pytest.raises(RunnerError, match=str(bad)):
+        _assert_no_writable_py_files(pkg)
+
+
+def test_assert_no_writable_py_files_scans_subdirectories(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "src"
+    sub = root / "dislocker_ui"
+    sub.mkdir(parents=True)
+    bad = sub / "mod.py"
+    bad.write_text("", encoding="utf-8")
+    bad.chmod(0o664)
+    with pytest.raises(RunnerError, match="writable"):
+        _assert_no_writable_py_files(root)
+
+
+@pytest.mark.parametrize("dirname", ["site-packages", "dist-packages"])
+def test_assert_no_writable_py_files_skips_root_owned_system_managed(
+    tmp_path: Path, dirname: str
+) -> None:
+    """Root-owned site-packages / dist-packages is exempt from the scan."""
+    from unittest.mock import patch
+
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / dirname
+    root.mkdir()
+    bad = root / "mod.py"
+    bad.write_text("", encoding="utf-8")
+    bad.chmod(0o664)
+    with patch("dislocker_ui.elevate._is_system_managed_install", return_value=True):
+        _assert_no_writable_py_files(root)
+
+
+@pytest.mark.parametrize("dirname", ["site-packages", "dist-packages"])
+def test_assert_no_writable_py_files_scans_user_owned_system_named_dir(
+    tmp_path: Path, dirname: str
+) -> None:
+    """User-owned directory merely named site-packages is NOT exempt."""
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / dirname
+    root.mkdir()
+    bad = root / "mod.py"
+    bad.write_text("", encoding="utf-8")
+    bad.chmod(0o664)
+    with pytest.raises(RunnerError, match="writable"):
+        _assert_no_writable_py_files(root)
+
+
+def test_assert_no_writable_py_files_rejects_writable_directory(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "src"
+    sub = root / "pkg"
+    sub.mkdir(parents=True)
+    sub.chmod(0o775)
+    ok = sub / "mod.py"
+    ok.write_text("", encoding="utf-8")
+    ok.chmod(0o644)
+    with pytest.raises(RunnerError, match=r"directory.*writable"):
+        _assert_no_writable_py_files(root)
+
+
+def test_assert_no_writable_py_files_rejects_writable_pyc(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "pkg"
+    root.mkdir()
+    bad = root / "mod.pyc"
+    bad.write_bytes(b"\x00")
+    bad.chmod(0o664)
+    with pytest.raises(RunnerError, match="writable"):
+        _assert_no_writable_py_files(root)
+
+
+def test_assert_no_writable_py_files_rejects_writable_pycache(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "pkg"
+    cache = root / "__pycache__"
+    cache.mkdir(parents=True)
+    cache.chmod(0o775)
+    with pytest.raises(RunnerError, match="writable"):
+        _assert_no_writable_py_files(root)
+
+
+def test_assert_no_writable_py_files_rejects_writable_so(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "pkg"
+    root.mkdir()
+    bad = root / "native.so"
+    bad.write_bytes(b"\x00")
+    bad.chmod(0o664)
+    with pytest.raises(RunnerError, match="writable"):
+        _assert_no_writable_py_files(root)
+
+
+def test_assert_no_writable_py_files_handles_stat_oserror(tmp_path: Path) -> None:
+    """A broken symlink (target deleted) does not abort the scan."""
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "pkg"
+    root.mkdir()
+    broken = root / "broken.py"
+    broken.symlink_to(tmp_path / "no-such-file")
+    ok = root / "mod.py"
+    ok.write_text("", encoding="utf-8")
+    ok.chmod(0o644)
+    _assert_no_writable_py_files(root)
+
+
+def test_is_system_managed_install_requires_root_ownership(tmp_path: Path) -> None:
+    from dislocker_ui.elevate import _is_system_managed_install
+
+    assert _is_system_managed_install(tmp_path / "other") is False
+    sp = tmp_path / "site-packages"
+    sp.mkdir()
+    assert _is_system_managed_install(sp) is False
+
+
+@pytest.mark.parametrize(
+    "dirname",
+    [
+        "dislocker_ui.egg-info",
+        "build",
+        "dist",
+        ".pytest_cache",
+        ".git",
+        "tmp",
+    ],
+)
+def test_assert_no_writable_py_files_skips_non_code_dirs(tmp_path: Path, dirname: str) -> None:
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "src"
+    d = root / dirname
+    d.mkdir(parents=True)
+    d.chmod(0o775)
+    ok = root / "mod.py"
+    ok.write_text("", encoding="utf-8")
+    ok.chmod(0o644)
+    _assert_no_writable_py_files(root)
+
+
+def test_assert_no_writable_py_files_prunes_excluded_dir_descendants(
+    tmp_path: Path,
+) -> None:
+    """Writable files inside an excluded directory (.git) are not checked."""
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    root = tmp_path / "src"
+    git_dir = root / ".git" / "objects"
+    git_dir.mkdir(parents=True)
+    bad = git_dir / "bad.py"
+    bad.write_text("", encoding="utf-8")
+    bad.chmod(0o664)
+    ok = root / "mod.py"
+    ok.write_text("", encoding="utf-8")
+    ok.chmod(0o644)
+    _assert_no_writable_py_files(root)
