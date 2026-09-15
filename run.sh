@@ -35,6 +35,26 @@ _check_not_group_world_writable "$ROOT"
 _check_not_group_world_writable "$ROOT/src"
 _check_not_group_world_writable "$ROOT/src/dislocker_ui/__main__.py"
 
+# Mirror elevate._assert_no_writable_py_files: a group-/world-writable .py,
+# .pyc, .so, or directory anywhere under src/ is a trojan module that root
+# would import via PYTHONPATH. Checking src/ itself is not enough because a
+# single file can be writable while its parent stays 755.
+_bad_src="$(find "$ROOT/src" \
+  \( -name '.git' -o -name '.hg' -o -name '.pytest_cache' -o -name '.tox' \
+     -o -name '.eggs' -o -name 'build' -o -name 'dist' -o -name 'tmp' \
+     -o -name '*.egg-info' \) -prune \
+  -o \( -type d \( -perm -020 -o -perm -002 \) -print \) \
+  -o \( -type f \( -name '*.py' -o -name '*.pyc' -o -name '*.so' \) \
+     \( -perm -020 -o -perm -002 \) -print \) 2>/dev/null)"
+# The top-level src/ dir was already gated above; ignore it here so the
+# recursive report lists only descendant trojan paths.
+_bad_src="$(printf '%s\n' "$_bad_src" | grep -v -x "$ROOT/src" || true)"
+if [ -n "$_bad_src" ]; then
+  echo "dislocker-ui: refusing group/world-writable Python module under src/ as root:" >&2
+  printf '%s\n' "$_bad_src" >&2
+  exit 1
+fi
+
 export PYTHONPATH="${ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
 # Drop to a clean cwd; keep SUDO_UID/SUDO_GID so mounts own files as the user.
 exec python3 -m dislocker_ui "$@"

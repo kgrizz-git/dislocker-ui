@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.5.2] - 2026-09-15
+
+### Security
+
+- `run.sh` now recursively refuses group/world-writable `.py`/`.pyc`/`.so`
+  files and descendant directories under `src/` before executing Python as
+  root, mirroring the osascript elevation preflight. A single writable module
+  nested under a 755 `src/` can no longer trojan the root import.
+- Elevation request integrity is now bound to the administrator-authorized
+  command: the parent embeds the SHA-256 of the exact request bytes in the
+  osascript shell command, and the privileged child rejects any content that
+  does not match. A same-user rewrite of volume/readonly during the admin
+  prompt no longer redirects the authorized mount.
+
 ## [0.5.1] - 2026-08-12
 
 ### Security

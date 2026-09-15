@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from io import StringIO
@@ -37,6 +38,11 @@ def _payload() -> dict[str, object]:
     }
 
 
+def _digest_of(path: Path) -> str:
+    """Return the hex SHA-256 of the exact request-file bytes."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def _request(base: Path, payload: dict[str, object]) -> Path:
     path = base / "dislocker-ui-req-test_123.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -50,8 +56,70 @@ def test_request_descriptor_loader_accepts_private_regular_file(tmp_path: Path) 
     base.mkdir(mode=0o700)
     request = _request(base, _payload())
     name = _request_entry_name(request, base)
-    assert _load_and_unlink_request(name, base, os.getuid())["action"] == "mount"
+    assert (
+        _load_and_unlink_request(name, base, os.getuid(), expected_sha256=_digest_of(request))[
+            "action"
+        ]
+        == "mount"
+    )
     assert not request.exists()
+
+
+def test_request_descriptor_loader_rejects_tampered_content(tmp_path: Path) -> None:
+    """A same-user rewrite after authorization is rejected via digest mismatch."""
+    base = tmp_path / "requests"
+    base.mkdir(mode=0o700)
+    request = _request(base, _payload())
+    name = _request_entry_name(request, base)
+    authorized = _digest_of(request)
+    # Simulate malware swapping volume/readonly while the admin prompt pends.
+    tampered = dict(_payload())
+    tampered["volume"] = "/dev/disk9s9"
+    tampered["readonly"] = False
+    request.write_text(json.dumps(tampered), encoding="utf-8")
+    request.chmod(0o600)
+    with pytest.raises(_ValidationError, match="authorized digest"):
+        _load_and_unlink_request(name, base, os.getuid(), expected_sha256=authorized)
+
+
+def test_request_descriptor_loader_rejects_invalid_digest(tmp_path: Path) -> None:
+    """A malformed expected digest fails closed before any file read."""
+    base = tmp_path / "requests"
+    base.mkdir(mode=0o700)
+    request = _request(base, _payload())
+    name = _request_entry_name(request, base)
+    with pytest.raises(_ValidationError, match="digest"):
+        _load_and_unlink_request(name, base, os.getuid(), expected_sha256="not-a-digest")
+
+
+def test_main_rejects_request_swapped_after_authorization(tmp_path: Path) -> None:
+    """End-to-end: a post-prompt rewrite fails validation before state creation."""
+    base = tmp_path / "requests"
+    base.mkdir(mode=0o700)
+    request = _request(base, _payload())
+    authorized = _digest_of(request)
+    tampered = dict(_payload())
+    tampered["volume"] = "/dev/disk9s9"
+    tampered["readonly"] = False
+    request.write_text(json.dumps(tampered), encoding="utf-8")
+    request.chmod(0o600)
+    with (
+        patch("dislocker_ui.privileged._user_base", return_value=base),
+        patch("dislocker_ui.privileged.ensure_root_state_dir") as ensure,
+    ):
+        from dislocker_ui.privileged import main
+
+        argv = [
+            "mount",
+            "--uid",
+            str(os.getuid()),
+            "--request",
+            str(request),
+            "--request-sha256",
+            authorized,
+        ]
+        assert main(argv) == EXIT_VALIDATION
+    ensure.assert_not_called()
 
 
 def test_request_descriptor_loader_rejects_symlink(tmp_path: Path) -> None:
@@ -64,7 +132,7 @@ def test_request_descriptor_loader_rejects_symlink(tmp_path: Path) -> None:
     name = _request_entry_name(link, base)
     uid = os.getuid()
     with pytest.raises(_ValidationError, match="cannot read request"):
-        _load_and_unlink_request(name, base, uid)
+        _load_and_unlink_request(name, base, uid, expected_sha256=_digest_of(real))
 
 
 @pytest.mark.parametrize("value", ["relative.json", "/tmp/request.json"])
@@ -145,7 +213,18 @@ def test_main_rejects_unassigned_gid_before_state_creation(tmp_path: Path) -> No
         from dislocker_ui.privileged import main
 
         assert (
-            main(["mount", "--uid", str(os.getuid()), "--request", str(request)]) == EXIT_VALIDATION
+            main(
+                [
+                    "mount",
+                    "--uid",
+                    str(os.getuid()),
+                    "--request",
+                    str(request),
+                    "--request-sha256",
+                    _digest_of(request),
+                ]
+            )
+            == EXIT_VALIDATION
         )
     ensure.assert_not_called()
 
@@ -173,7 +252,20 @@ def test_main_fails_before_mount_when_trusted_deps_missing(tmp_path: Path) -> No
     ):
         from dislocker_ui.privileged import main
 
-        assert main(["mount", "--uid", str(os.getuid()), "--request", str(request)]) == EXIT_RUNNER
+        assert (
+            main(
+                [
+                    "mount",
+                    "--uid",
+                    str(os.getuid()),
+                    "--request",
+                    str(request),
+                    "--request-sha256",
+                    _digest_of(request),
+                ]
+            )
+            == EXIT_RUNNER
+        )
     mount.assert_not_called()
 
 
@@ -190,7 +282,18 @@ def test_main_rejects_invalid_request_before_state_creation(tmp_path: Path) -> N
         from dislocker_ui.privileged import main
 
         assert (
-            main(["mount", "--uid", str(os.getuid()), "--request", str(request)]) == EXIT_VALIDATION
+            main(
+                [
+                    "mount",
+                    "--uid",
+                    str(os.getuid()),
+                    "--request",
+                    str(request),
+                    "--request-sha256",
+                    _digest_of(request),
+                ]
+            )
+            == EXIT_VALIDATION
         )
     ensure.assert_not_called()
 
@@ -221,7 +324,20 @@ def test_main_mount_uses_only_root_derived_state_and_deps(tmp_path: Path) -> Non
     ):
         from dislocker_ui.privileged import EXIT_OK, main
 
-        assert main(["mount", "--uid", str(os.getuid()), "--request", str(request)]) == EXIT_OK
+        assert (
+            main(
+                [
+                    "mount",
+                    "--uid",
+                    str(os.getuid()),
+                    "--request",
+                    str(request),
+                    "--request-sha256",
+                    _digest_of(request),
+                ]
+            )
+            == EXIT_OK
+        )
     assert mount.call_args.kwargs["session_path"] == state / "active_session.json"
     assert mount.call_args.kwargs["elevated"] is True
     finalize.assert_called_once_with(state / "active_session.json", os.getgid())
@@ -255,7 +371,20 @@ def test_main_logs_manual_recovery_when_session_finalization_fails(tmp_path: Pat
     ):
         from dislocker_ui.privileged import main
 
-        assert main(["mount", "--uid", str(os.getuid()), "--request", str(request)]) == EXIT_RUNNER
+        assert (
+            main(
+                [
+                    "mount",
+                    "--uid",
+                    str(os.getuid()),
+                    "--request",
+                    str(request),
+                    "--request-sha256",
+                    _digest_of(request),
+                ]
+            )
+            == EXIT_RUNNER
+        )
     assert any(
         "Manually unmount /Volumes/USB, detach /dev/disk9" in call.args[0]
         for call in log.write.call_args_list
@@ -310,5 +439,18 @@ def test_main_unmount_uses_canonical_session(tmp_path: Path) -> None:
     ):
         from dislocker_ui.privileged import EXIT_OK, main
 
-        assert main(["unmount", "--uid", str(os.getuid()), "--request", str(request)]) == EXIT_OK
+        assert (
+            main(
+                [
+                    "unmount",
+                    "--uid",
+                    str(os.getuid()),
+                    "--request",
+                    str(request),
+                    "--request-sha256",
+                    _digest_of(request),
+                ]
+            )
+            == EXIT_OK
+        )
     assert unmount.call_args.kwargs["session_path"] == state / "active_session.json"

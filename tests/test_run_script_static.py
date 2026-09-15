@@ -44,3 +44,12 @@ def test_run_sh_refuses_group_world_writable_tree() -> None:
     assert "& 022" in body
     assert "Ownership model" in body
     assert "-maxdepth" not in body
+
+
+def test_run_sh_scans_src_recursively_for_writable_modules() -> None:
+    """Root launch must catch a writable .py nested under src/ (not just src/)."""
+    body = _SCRIPT.read_text(encoding="utf-8")
+    assert 'find "$ROOT/src"' in body
+    assert "*.py" in body
+    assert "-perm -020" in body
+    assert "-perm -002" in body

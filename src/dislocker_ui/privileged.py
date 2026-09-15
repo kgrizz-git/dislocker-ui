@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
+import hmac
 import json
 import os
 import pwd
@@ -35,6 +37,7 @@ EXIT_VALIDATION = 2
 EXIT_RUNNER = 3
 EXIT_UNEXPECTED = 4
 _REQUEST_NAME_RE = re.compile(r"^dislocker-ui-req-\w{6,}\.json$", re.ASCII)
+_REQUEST_SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
 
 
 class _ValidationError(ValueError):
@@ -47,13 +50,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("action", choices=("mount", "unmount"))
     parser.add_argument("--uid", required=True, type=int)
     parser.add_argument("--request", required=True, type=Path)
+    parser.add_argument("--request-sha256", required=True)
     args = parser.parse_args(argv)
     log_fp: TextIO | None = None
     try:
         os.chdir("/")
+        if not _REQUEST_SHA256_RE.fullmatch(args.request_sha256 or ""):
+            raise _ValidationError("request digest is invalid")
         user_base = _user_base(args.uid)
         request_name = _request_entry_name(args.request, user_base)
-        payload = _load_and_unlink_request(request_name, user_base, args.uid)
+        payload = _load_and_unlink_request(
+            request_name, user_base, args.uid, expected_sha256=args.request_sha256
+        )
         _validate_request(payload, expected_action=args.action, expected_uid=args.uid)
         uid, gid = args.uid, _validated_gid(args.uid, int(payload["gid"]))
         state_dir = ensure_root_state_dir(uid, gid)
@@ -153,10 +161,20 @@ def _request_entry_name(path: Path, base: Path) -> str:
     return relative.name
 
 
-def _load_and_unlink_request(name: str, base: Path, owner_uid: int) -> dict[str, Any]:
-    """Read a verified request descriptor, then unlink its exact directory entry."""
+def _load_and_unlink_request(
+    name: str, base: Path, owner_uid: int, *, expected_sha256: str
+) -> dict[str, Any]:
+    """Read a verified request descriptor, then unlink its exact directory entry.
+
+    *expected_sha256* is the hex digest of the exact request bytes, bound to
+    the administrator-authorized command. The file lives in a user-writable
+    directory, so same-user malware could rewrite it while the admin prompt
+    is pending; a content mismatch is rejected before any mount side effect.
+    """
     if not _REQUEST_NAME_RE.fullmatch(name):
         raise _ValidationError("request entry name is invalid")
+    if not _REQUEST_SHA256_RE.fullmatch(expected_sha256 or ""):
+        raise _ValidationError("request digest is invalid")
     flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         dir_fd = os.open(str(base), flags)
@@ -170,9 +188,16 @@ def _load_and_unlink_request(name: str, base: Path, owner_uid: int) -> dict[str,
                 raise _ValidationError("request must be a regular file owned by the invoking user")
             if stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1:
                 raise _ValidationError("request must be mode 0600 with one link")
-            with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            with os.fdopen(fd, "rb") as handle:
                 fd = -1
-                raw = handle.read()
+                raw_bytes = handle.read()
+            try:
+                raw = raw_bytes.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise _ValidationError(f"invalid request encoding: {exc}") from exc
+            actual = hashlib.sha256(raw_bytes).hexdigest()
+            if not hmac.compare_digest(actual, expected_sha256):
+                raise _ValidationError("request content does not match the authorized digest")
         finally:
             if fd >= 0:
                 os.close(fd)

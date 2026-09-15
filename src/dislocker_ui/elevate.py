@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -53,6 +54,7 @@ _ADMIN_PROMPT = (
 _TIMEOUT_SECONDS = 600
 _LOG_TAIL_BYTES = 8 * 1024
 _ERROR_NUMBER_RE = re.compile(r"\((-?\d+)\)\s*$|number\s+(-?\d+)", re.IGNORECASE)
+_REQUEST_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _EXIT_REASONS = {2: "request validation", 3: "mount/unmount", 4: "unexpected"}
 _TIMED_OUT_MSG = (
     "Administrator authorization timed out. Try again and complete the prompt promptly."
@@ -89,15 +91,27 @@ def run_elevated_mount(
 
     On success, load and return the session written by the child. Always
     unlinks the request file. Does not clear an existing session on cancel.
+
+    The request file lives in a user-writable directory, so its bytes could
+    be swapped by same-user malware while the admin prompt is pending. To
+    bind the authorized intent, the SHA-256 of the exact request bytes is
+    embedded in the authorized osascript command; the privileged child
+    rejects any content that does not match.
     """
     validate_volume_path(req.volume)
-    request_path = _write_request(
+    request_path, request_sha256 = _write_request(
         action="mount",
         req=req,
         request_dir=request_dir or _request_directory(),
     )
     try:
-        _run_osascript(request_path, action="mount", log=log, log_path=log_path)
+        _run_osascript(
+            request_path,
+            action="mount",
+            log=log,
+            log_path=log_path,
+            request_sha256=request_sha256,
+        )
         session = load_session(session_path)
         if session is None:
             raise RunnerError(
@@ -119,14 +133,23 @@ def run_elevated_unmount(
     Write an unmount request and run the privileged child via osascript.
 
     On cancel/timeout the session file is left intact (caller must not clear).
+
+    The request digest is bound to the authorized command the same way as
+    mounts (see :func:`run_elevated_mount`).
     """
-    request_path = _write_request(
+    request_path, request_sha256 = _write_request(
         action="unmount",
         req=None,
         request_dir=request_dir or _request_directory(),
     )
     try:
-        _run_osascript(request_path, action="unmount", log=log, log_path=log_path)
+        _run_osascript(
+            request_path,
+            action="unmount",
+            log=log,
+            log_path=log_path,
+            request_sha256=request_sha256,
+        )
     finally:
         _unlink_quiet(request_path)
 
@@ -336,14 +359,20 @@ def build_osascript(shell_command: str, *, prompt: str = _ADMIN_PROMPT) -> str:
     )
 
 
-def build_privileged_shell_command(action: str, request_path: Path) -> str:
+def build_privileged_shell_command(action: str, request_path: Path, *, request_sha256: str) -> str:
     """
     Assemble ``cd / && env PYTHONPATH=… python -s -P -m dislocker_ui.privileged …``.
 
     Each argv token is shlex-quoted; the result is NOT yet AppleScript-escaped.
+
+    *request_sha256* is the hex SHA-256 of the exact request-file bytes. It
+    travels inside the administrator-authorized command so the privileged
+    child can reject a request swapped after the prompt appeared.
     """
     if action not in ("mount", "unmount"):
         raise RunnerError(f"Invalid privileged action: {action}")
+    if not _REQUEST_SHA256_RE.fullmatch(request_sha256 or ""):
+        raise RunnerError("Invalid request digest for privileged command")
     python = str(Path(sys.executable).resolve())
     src_root = Path(__file__).resolve().parent.parent
     argv = [
@@ -359,6 +388,8 @@ def build_privileged_shell_command(action: str, request_path: Path) -> str:
         str(os.getuid()),
         "--request",
         str(request_path.resolve()),
+        "--request-sha256",
+        request_sha256,
     ]
     return "cd / && " + " ".join(shlex.quote(part) for part in argv)
 
@@ -417,8 +448,14 @@ def _write_request(
     action: str,
     req: MountRequest | None,
     request_dir: Path,
-) -> Path:
-    """Create a mode-0600 request JSON; secret is inserted last when present."""
+) -> tuple[Path, str]:
+    """Create a mode-0600 request JSON; return (path, sha256 of exact bytes).
+
+    The digest is computed from the in-memory serialized bytes before the
+    write, so a same-user rewrite between write and hash cannot smuggle a
+    different intent into the authorized command. Secret is inserted last
+    when present.
+    """
     fd, name = tempfile.mkstemp(prefix="dislocker-ui-req-", suffix=".json", dir=str(request_dir))
     path = Path(name)
     try:
@@ -441,6 +478,7 @@ def _write_request(
             # Write secret last so it is the final JSON key (insertion order).
             payload["secret"] = secret
         data = json.dumps(payload, indent=2) + "\n"
+        digest = hashlib.sha256(data.encode("utf-8")).hexdigest()
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             fd = -1  # ownership transferred
             handle.write(data)
@@ -450,12 +488,21 @@ def _write_request(
                 os.close(fd)
         _unlink_quiet(path)
         raise
-    return path
+    return path, digest
 
 
-def _run_osascript(request_path: Path, *, action: str, log: LogFn, log_path: Path) -> None:
+def _run_osascript(
+    request_path: Path,
+    *,
+    action: str,
+    log: LogFn,
+    log_path: Path,
+    request_sha256: str,
+) -> None:
     """Invoke osascript; raise classified errors on non-zero exit."""
-    shell_cmd = build_privileged_shell_command(action, request_path)
+    if not _REQUEST_SHA256_RE.fullmatch(request_sha256 or ""):
+        raise RunnerError("Invalid request digest for elevation")
+    shell_cmd = build_privileged_shell_command(action, request_path, request_sha256=request_sha256)
     script = build_osascript(shell_cmd)
     log("Requesting administrator privileges…")
     try:

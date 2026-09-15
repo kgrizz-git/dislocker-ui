@@ -6,6 +6,21 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.5.2] - 2026-09-15
+
+### Fixed
+
+- `run.sh` recursive writable-module gate (`find "$ROOT/src"` for
+  group/world-writable `.py`/`.pyc`/`.so` + directories, pruning VCS/build
+  dirs); static test asserts the recursive scan.
+- `_write_request` returns `(path, sha256)` computed from in-memory bytes;
+  `build_privileged_shell_command` / `_run_osascript` carry
+  `--request-sha256`; `privileged._load_and_unlink_request` verifies the
+  digest (constant-time compare) before JSON parsing.
+- Tests: digest binding in authorized command, invalid-digest rejection,
+  tampered-content rejection (loader + `main` end-to-end), digest-matches-bytes
+  assertion, `run.sh` recursive-scan static test.
+
 ## [0.5.1] - 2026-08-12
 
 ### Added

@@ -73,7 +73,7 @@ def test_quoting_handles_spaces_quotes_dollar_backticks(tmp_path: Path) -> None:
     """shlex quoting protects spaces, quotes, $, and backticks in paths."""
     tricky = tmp_path / 'req $`" weird.json'
     tricky.write_text("{}", encoding="utf-8")
-    cmd = build_privileged_shell_command("mount", tricky)
+    cmd = build_privileged_shell_command("mount", tricky, request_sha256="ab" * 32)
     assert "cd / &&" in cmd
     assert "-s" in cmd
     assert "-P" in cmd
@@ -93,7 +93,7 @@ def test_applescript_contains_request_path_not_secret(tmp_path: Path) -> None:
     req_path = tmp_path / "request.json"
     req_path.write_text("{}", encoding="utf-8")
     secret = "SuperSecretPassword123!"
-    cmd = build_privileged_shell_command("mount", req_path)
+    cmd = build_privileged_shell_command("mount", req_path, request_sha256="ab" * 32)
     script = build_osascript(cmd)
     assert str(req_path.resolve()) in cmd
     assert secret not in script
@@ -255,6 +255,7 @@ def test_run_elevated_mount_success_loads_session(tmp_path: Path) -> None:
         script = argv[2]
         assert "sekrit" not in script
         assert "dislocker_ui.privileged" in script
+        assert "--request-sha256" in script
         # Request file should exist during the call and contain the secret.
         # Recover path from script is hard; just succeed.
         return type("R", (), {"returncode": 0, "stderr": "", "stdout": ""})()
@@ -359,6 +360,8 @@ def test_assert_safe_path_rejects_world_writable(tmp_path: Path) -> None:
 
 def test_request_json_secret_is_last_key(tmp_path: Path) -> None:
     """Secret is the last key in the written request JSON object."""
+    import hashlib
+
     from dislocker_ui.elevate import _write_request
 
     req = MountRequest(
@@ -367,20 +370,42 @@ def test_request_json_secret_is_last_key(tmp_path: Path) -> None:
         secret="last-please",
         readonly=True,
     )
-    path = _write_request(
+    path, digest = _write_request(
         action="mount",
         req=req,
         request_dir=tmp_path,
     )
     try:
-        text = path.read_text(encoding="utf-8")
+        raw = path.read_bytes()
+        text = raw.decode("utf-8")
         data = json.loads(text)
         assert list(data.keys())[-1] == "secret"
         assert data["secret"] == "last-please"
         assert data["action"] == "mount"
         assert oct(path.stat().st_mode & 0o777) == "0o600"
+        assert digest == hashlib.sha256(raw).hexdigest()
     finally:
         path.unlink(missing_ok=True)
+
+
+def test_privileged_command_binds_request_digest(tmp_path: Path) -> None:
+    """The authorized command carries the request SHA-256 for child verification."""
+    req_path = tmp_path / "request.json"
+    req_path.write_text("{}", encoding="utf-8")
+    digest = "cd" * 32
+    cmd = build_privileged_shell_command("mount", req_path, request_sha256=digest)
+    assert "--request-sha256" in cmd
+    assert digest in cmd
+
+
+def test_privileged_command_rejects_invalid_digest(tmp_path: Path) -> None:
+    """An invalid digest never reaches the authorized command."""
+    from dislocker_ui.runner import RunnerError
+
+    req_path = tmp_path / "request.json"
+    req_path.write_text("{}", encoding="utf-8")
+    with pytest.raises(RunnerError, match="digest"):
+        build_privileged_shell_command("mount", req_path, request_sha256="not-a-digest")
 
 
 def test_prepare_elevation_paths_checks_writable_py_files(
