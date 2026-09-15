@@ -13,6 +13,11 @@ Version numbers match `VERSION` / SemVer with the public changelog.
 - `run.sh` recursive writable-module gate (`find "$ROOT/src"` for
   group/world-writable `.py`/`.pyc`/`.so` + directories, pruning VCS/build
   dirs); static test asserts the recursive scan.
+- Review follow-ups: symlink targets `stat -L`'d (parity with Python's
+  following `stat`; broken links skipped like the `OSError` swallow),
+  `grep -v -xF` fixed-string self-filter (a `[` in `$ROOT` previously made
+  grep fail and `|| true` discard all findings), fail-closed diagnostic when
+  `find` itself errors under `set -e`.
 - `_write_request` returns `(path, sha256)` computed from in-memory bytes;
   `build_privileged_shell_command` / `_run_osascript` carry
   `--request-sha256`; `privileged._load_and_unlink_request` verifies the

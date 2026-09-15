@@ -14,7 +14,10 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 - `run.sh` now recursively refuses group/world-writable `.py`/`.pyc`/`.so`
   files and descendant directories under `src/` before executing Python as
   root, mirroring the osascript elevation preflight. A single writable module
-  nested under a 755 `src/` can no longer trojan the root import.
+  nested under a 755 `src/` can no longer trojan the root import. Symlink
+  targets are checked too (matching the Python scanner's following `stat`),
+  the `src/` self-filter is a fixed-string match, and a scan failure aborts
+  with a diagnostic instead of silently.
 - Elevation request integrity is now bound to the administrator-authorized
   command: the parent embeds the SHA-256 of the exact request bytes in the
   osascript shell command, and the privileged child rejects any content that

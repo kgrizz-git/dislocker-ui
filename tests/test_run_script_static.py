@@ -53,3 +53,12 @@ def test_run_sh_scans_src_recursively_for_writable_modules() -> None:
     assert "*.py" in body
     assert "-perm -020" in body
     assert "-perm -002" in body
+
+
+def test_run_sh_symlink_and_filter_hardening() -> None:
+    """Symlink targets are stat'ed (-L); the src self-filter is fixed-string."""
+    body = _SCRIPT.read_text(encoding="utf-8")
+    assert "-type l" in body
+    assert "stat -L -f '%OLp'" in body
+    # Fixed-string grep: a regex metacharacter in $ROOT must not discard findings.
+    assert "grep -v -xF" in body

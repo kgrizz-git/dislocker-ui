@@ -39,19 +39,54 @@ _check_not_group_world_writable "$ROOT/src/dislocker_ui/__main__.py"
 # .pyc, .so, or directory anywhere under src/ is a trojan module that root
 # would import via PYTHONPATH. Checking src/ itself is not enough because a
 # single file can be writable while its parent stays 755.
-_bad_src="$(find "$ROOT/src" \
+if ! _bad_src="$(find "$ROOT/src" \
   \( -name '.git' -o -name '.hg' -o -name '.pytest_cache' -o -name '.tox' \
      -o -name '.eggs' -o -name 'build' -o -name 'dist' -o -name 'tmp' \
      -o -name '*.egg-info' \) -prune \
   -o \( -type d \( -perm -020 -o -perm -002 \) -print \) \
   -o \( -type f \( -name '*.py' -o -name '*.pyc' -o -name '*.so' \) \
-     \( -perm -020 -o -perm -002 \) -print \) 2>/dev/null)"
+     \( -perm -020 -o -perm -002 \) -print \) 2>/dev/null)"; then
+  # Fail closed with a diagnostic (set -e would otherwise abort silently).
+  echo "dislocker-ui: could not scan src/ for writable modules as root" >&2
+  exit 1
+fi
 # The top-level src/ dir was already gated above; ignore it here so the
-# recursive report lists only descendant trojan paths.
-_bad_src="$(printf '%s\n' "$_bad_src" | grep -v -x "$ROOT/src" || true)"
-if [ -n "$_bad_src" ]; then
+# recursive report lists only descendant trojan paths. Fixed-string match:
+# $ROOT may contain regex metacharacters (a broken pattern + || true would
+# silently discard every finding).
+_bad_src="$(printf '%s\n' "$_bad_src" | grep -v -xF -- "$ROOT/src" || true)"
+# Symlinks are not followed by find (-P), but Python's entry.stat() follows
+# them. Stat each link's target (-L); a broken link is skipped, mirroring the
+# Python scanner's OSError swallow.
+_bad_links=""
+if ! _bad_links="$(find "$ROOT/src" \
+  \( -name '.git' -o -name '.hg' -o -name '.pytest_cache' -o -name '.tox' \
+     -o -name '.eggs' -o -name 'build' -o -name 'dist' -o -name 'tmp' \
+     -o -name '*.egg-info' \) -prune \
+  -o \( -type l -print \) 2>/dev/null)"; then
+  echo "dislocker-ui: could not scan src/ symlinks for writable targets as root" >&2
+  exit 1
+fi
+_bad_link_targets=""
+if [ -n "$_bad_links" ]; then
+  while IFS= read -r _link; do
+    [ -n "$_link" ] || continue
+    if _mode="$(stat -L -f '%OLp' "$_link" 2>/dev/null)"; then
+      if [ $((8#$_mode & 022)) -ne 0 ]; then
+        _bad_link_targets="${_bad_link_targets:+$_bad_link_targets
+}$_link"
+      fi
+    fi
+  done <<< "$_bad_links"
+fi
+if [ -n "$_bad_src" ] || [ -n "$_bad_link_targets" ]; then
   echo "dislocker-ui: refusing group/world-writable Python module under src/ as root:" >&2
-  printf '%s\n' "$_bad_src" >&2
+  if [ -n "$_bad_src" ]; then
+    printf '%s\n' "$_bad_src" >&2
+  fi
+  if [ -n "$_bad_link_targets" ]; then
+    printf '%s\n' "$_bad_link_targets" >&2
+  fi
   exit 1
 fi
 

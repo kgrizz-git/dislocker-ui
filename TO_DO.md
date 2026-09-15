@@ -15,3 +15,7 @@ Open work only for **dislocker-ui**.
 
 - [Privileged helper hardening](plans/2026-08-05-privileged-helper-hardening.md):
   remediate the security audit findings in the elevated mount/unmount workflow.
+  - Follow-up (review N2, 2026-09-15): `elevate._assert_no_writable_py_files`
+    silently skips unreadable dirs (`os.walk` error swallow) and per-file stat
+    `OSError`s — fail-open where `run.sh` is now fail-closed. Decide whether
+    the preflight should refuse when it cannot fully scan.
