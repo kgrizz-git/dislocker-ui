@@ -56,8 +56,11 @@ fi
 # silently discard every finding).
 _bad_src="$(printf '%s\n' "$_bad_src" | grep -v -xF -- "$ROOT/src" || true)"
 # Symlinks are not followed by find (-P), but Python's entry.stat() follows
-# them. Stat each link's target (-L); a broken link is skipped, mirroring the
-# Python scanner's OSError swallow.
+# them. Classify each link: a symlinked directory is importable as a package
+# yet never descended into, so refuse it outright; a non-directory link is a
+# trojan vector only under an importable name (.py/.pyc/.so, as seen by the
+# import system), so benign doc/resource links cannot block startup. A broken
+# link fails target stat and is skipped, mirroring the Python OSError swallow.
 _bad_links=""
 if ! _bad_links="$(find "$ROOT/src" \
   \( -name '.git' -o -name '.hg' -o -name '.pytest_cache' -o -name '.tox' \
@@ -71,11 +74,27 @@ _bad_link_targets=""
 if [ -n "$_bad_links" ]; then
   while IFS= read -r _link; do
     [ -n "$_link" ] || continue
-    if _mode="$(stat -L -f '%OLp' "$_link" 2>/dev/null)"; then
-      if [ $((8#$_mode & 022)) -ne 0 ]; then
-        _bad_link_targets="${_bad_link_targets:+$_bad_link_targets
+    if [ ! -e "$_link" ] && [ ! -L "$_link" ]; then
+      # Unresolvable entry (e.g. a newline-split filename fragment, or a file
+      # that vanished mid-scan): the scan cannot represent it, so fail closed
+      # instead of silently skipping a possibly-writable target.
+      echo "dislocker-ui: refusing unreadable path under src/ as root" >&2
+      exit 1
+    fi
+    if [ -d "$_link" ]; then
+      _bad_link_targets="${_bad_link_targets:+$_bad_link_targets
 }$_link"
-      fi
+    else
+      case "$_link" in
+      *.py | *.pyc | *.so)
+        if _mode="$(stat -L -f '%OLp' "$_link" 2>/dev/null)"; then
+          if [ $((8#$_mode & 022)) -ne 0 ]; then
+            _bad_link_targets="${_bad_link_targets:+$_bad_link_targets
+}$_link"
+          fi
+        fi
+        ;;
+      esac
     fi
   done <<< "$_bad_links"
 fi

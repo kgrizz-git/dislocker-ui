@@ -62,3 +62,9 @@ def test_run_sh_symlink_and_filter_hardening() -> None:
     assert "stat -L -f '%OLp'" in body
     # Fixed-string grep: a regex metacharacter in $ROOT must not discard findings.
     assert "grep -v -xF" in body
+    # Symlinked dirs are refused (never descended into); non-dir links are
+    # filtered by importable extension so benign links cannot block startup.
+    assert '-d "$_link"' in body
+    assert "*.py | *.pyc | *.so" in body
+    # Unresolvable entries fail closed instead of skipping a split filename.
+    assert "refusing unreadable path" in body

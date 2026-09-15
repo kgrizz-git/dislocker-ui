@@ -78,8 +78,9 @@ def test_request_descriptor_loader_rejects_tampered_content(tmp_path: Path) -> N
     tampered["readonly"] = False
     request.write_text(json.dumps(tampered), encoding="utf-8")
     request.chmod(0o600)
+    uid = os.getuid()
     with pytest.raises(_ValidationError, match="authorized digest"):
-        _load_and_unlink_request(name, base, os.getuid(), expected_sha256=authorized)
+        _load_and_unlink_request(name, base, uid, expected_sha256=authorized)
 
 
 def test_request_descriptor_loader_rejects_invalid_digest(tmp_path: Path) -> None:
@@ -88,8 +89,9 @@ def test_request_descriptor_loader_rejects_invalid_digest(tmp_path: Path) -> Non
     base.mkdir(mode=0o700)
     request = _request(base, _payload())
     name = _request_entry_name(request, base)
+    uid = os.getuid()
     with pytest.raises(_ValidationError, match="digest"):
-        _load_and_unlink_request(name, base, os.getuid(), expected_sha256="not-a-digest")
+        _load_and_unlink_request(name, base, uid, expected_sha256="not-a-digest")
 
 
 def test_main_rejects_request_swapped_after_authorization(tmp_path: Path) -> None:
@@ -131,8 +133,9 @@ def test_request_descriptor_loader_rejects_symlink(tmp_path: Path) -> None:
     link.symlink_to(real)
     name = _request_entry_name(link, base)
     uid = os.getuid()
+    digest = _digest_of(real)
     with pytest.raises(_ValidationError, match="cannot read request"):
-        _load_and_unlink_request(name, base, uid, expected_sha256=_digest_of(real))
+        _load_and_unlink_request(name, base, uid, expected_sha256=digest)
 
 
 @pytest.mark.parametrize("value", ["relative.json", "/tmp/request.json"])

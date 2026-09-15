@@ -18,6 +18,11 @@ Version numbers match `VERSION` / SemVer with the public changelog.
   `grep -v -xF` fixed-string self-filter (a `[` in `$ROOT` previously made
   grep fail and `|| true` discard all findings), fail-closed diagnostic when
   `find` itself errors under `set -e`.
+- PR review follow-ups (sourcery/greptile/sonar): refuse symlinked
+  directories (package-importable, never descended), filter non-dir links by
+  importable extension on the link name, fail closed on unresolvable entries
+  (newline-split filenames); hoist nested calls out of `pytest.raises`
+  blocks in `tests/test_privileged.py`.
 - `_write_request` returns `(path, sha256)` computed from in-memory bytes;
   `build_privileged_shell_command` / `_run_osascript` carry
   `--request-sha256`; `privileged._load_and_unlink_request` verifies the
