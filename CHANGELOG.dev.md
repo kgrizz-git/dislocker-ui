@@ -30,6 +30,9 @@ Version numbers match `VERSION` / SemVer with the public changelog.
   `build_privileged_shell_command` / `_run_osascript` carry
   `--request-sha256`; `privileged._load_and_unlink_request` verifies the
   digest (constant-time compare) before JSON parsing.
+- Deepseek delta re-review: `cd "$ROOT"` before root exec; gate top-level
+  `$ROOT/*.py|*.pyc|*.so` (plain files mode-checked, symlinks/non-files
+  refused outright); behavioral find tests + cd ordering assertion.
 - Tests: digest binding in authorized command, invalid-digest rejection,
   tampered-content rejection (loader + `main` end-to-end), digest-matches-bytes
   assertion, `run.sh` recursive-scan static test.

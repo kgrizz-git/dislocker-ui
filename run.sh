@@ -35,6 +35,21 @@ _check_not_group_world_writable "$ROOT"
 _check_not_group_world_writable "$ROOT/src"
 _check_not_group_world_writable "$ROOT/src/dislocker_ui/__main__.py"
 
+# Files directly under $ROOT are importable via cwd on sys.path[0] (e.g.
+# sitecustomize.py, or a top-level extension module), which the recursive
+# $ROOT/src scan does not cover. Gate importable names explicitly: anything
+# that is not a plain file (symlink, directory) is refused outright like
+# symlinks under src/; plain files must not be group/world-writable.
+for _top in "$ROOT"/*.py "$ROOT"/*.pyc "$ROOT"/*.so; do
+  # Unmatched globs expand to themselves; skip those.
+  [ -e "$_top" ] || [ -L "$_top" ] || continue
+  if [ -L "$_top" ] || [ ! -f "$_top" ]; then
+    echo "dislocker-ui: refusing non-plain-file Python module as root: $_top" >&2
+    exit 1
+  fi
+  _check_not_group_world_writable "$_top"
+done
+
 # Mirror elevate._assert_no_writable_py_files: a group-/world-writable .py,
 # .pyc, .so, or directory anywhere under src/ is a trojan module that root
 # would import via PYTHONPATH. Checking src/ itself is not enough because a

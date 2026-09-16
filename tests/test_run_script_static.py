@@ -82,6 +82,16 @@ def test_run_sh_drops_cwd_before_exec() -> None:
     assert body.index('cd "$ROOT"') < body.index("exec python3 -m dislocker_ui")
 
 
+def test_run_sh_gates_top_level_importable_files() -> None:
+    """$ROOT/*.py is importable via cwd; gate it outside the src/ scan."""
+    body = _SCRIPT.read_text(encoding="utf-8")
+    assert '"$ROOT"/*.py' in body
+    assert '"$ROOT"/*.pyc' in body
+    assert '"$ROOT"/*.so' in body
+    assert '[ -L "$_top" ]' in body
+    assert "non-plain-file Python module" in body
+
+
 # Verbatim mirror of the run.sh recursive-find expression (run.sh scans for
 # writable modules). Flags used here (-prune, -o, -type, -name, -perm -020)
 # are BSD + GNU compatible. Keep in sync with run.sh when it changes.

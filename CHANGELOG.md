@@ -14,11 +14,14 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 - `run.sh` now recursively refuses group/world-writable `.py`/`.pyc`/`.so`
   files and descendant directories under `src/` before executing Python as
   root, going beyond the osascript elevation preflight (outright symlink
-  refusal, fail-closed scans). A single writable module
-  nested under a 755 `src/` can no longer trojan the root import. Symlink
-  targets are checked too (matching the Python scanner's following `stat`),
-  the `src/` self-filter is a fixed-string match, and a scan failure aborts
-  with a diagnostic instead of silently.
+  refusal, fail-closed scans). A single writable module nested under a 755
+  `src/` can no longer trojan the root import. The `src/` self-filter is a
+  fixed-string match, and a scan failure aborts with a diagnostic instead of
+  silently.
+- `run.sh` also gates importable files placed directly under the checkout
+  root (importable via cwd on `sys.path`) and cds into the checkout before
+  exec, so launching from an untrusted directory cannot shadow the scanned
+  tree.
 - `run.sh` symlink gate follow-ups: symlinked directories are refused
   outright (importable as packages yet never descended into), importable
   `.py`/`.pyc`/`.so` link names are refused outright (target mode bits prove
