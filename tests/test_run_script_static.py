@@ -56,15 +56,16 @@ def test_run_sh_scans_src_recursively_for_writable_modules() -> None:
 
 
 def test_run_sh_symlink_and_filter_hardening() -> None:
-    """Symlink targets are stat'ed (-L); the src self-filter is fixed-string."""
+    """Symlink dirs/importable names refused; self-filter is fixed-string."""
     body = _SCRIPT.read_text(encoding="utf-8")
     assert "-type l" in body
-    assert "stat -L -f '%OLp'" in body
     # Fixed-string grep: a regex metacharacter in $ROOT must not discard findings.
     assert "grep -v -xF" in body
-    # Symlinked dirs are refused (never descended into); non-dir links are
-    # filtered by importable extension so benign links cannot block startup.
+    # Symlinked dirs are refused (never descended into); importable link names
+    # are refused outright (target mode bits prove nothing: attacker-owned
+    # 0644 or replaceable via a writable parent).
     assert '-d "$_link"' in body
     assert "*.py | *.pyc | *.so" in body
+    assert "stat -L" not in body
     # Unresolvable entries fail closed instead of skipping a split filename.
     assert "refusing unreadable path" in body

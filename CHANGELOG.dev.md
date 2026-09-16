@@ -23,6 +23,10 @@ Version numbers match `VERSION` / SemVer with the public changelog.
   importable extension on the link name, fail closed on unresolvable entries
   (newline-split filenames); hoist nested calls out of `pytest.raises`
   blocks in `tests/test_privileged.py`.
+- CodeRabbit follow-up (Critical, path traversal): refuse importable
+  `.py`/`.pyc`/`.so` link names outright instead of `stat -L` target mode
+  checks (owner-agnostic bits miss attacker-owned 0644 / writable-parent
+  replacement); `stat -L` removed from `run.sh`.
 - `_write_request` returns `(path, sha256)` computed from in-memory bytes;
   `build_privileged_shell_command` / `_run_osascript` carry
   `--request-sha256`; `privileged._load_and_unlink_request` verifies the

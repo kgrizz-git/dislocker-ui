@@ -19,9 +19,11 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
   the `src/` self-filter is a fixed-string match, and a scan failure aborts
   with a diagnostic instead of silently.
 - `run.sh` symlink gate follow-ups: symlinked directories are refused
-  outright (importable as packages yet never descended into), non-directory
-  links are filtered by importable extension so benign resource links cannot
-  block startup, and unresolvable entries fail closed.
+  outright (importable as packages yet never descended into), importable
+  `.py`/`.pyc`/`.so` link names are refused outright (target mode bits prove
+  nothing: attacker-owned 0644 or replaceable via a writable parent),
+  non-importable links stay allowed so benign resource links cannot block
+  startup, and unresolvable entries fail closed.
 - Elevation request integrity is now bound to the administrator-authorized
   command: the parent embeds the SHA-256 of the exact request bytes in the
   osascript shell command, and the privileged child rejects any content that

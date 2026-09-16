@@ -55,12 +55,13 @@ fi
 # $ROOT may contain regex metacharacters (a broken pattern + || true would
 # silently discard every finding).
 _bad_src="$(printf '%s\n' "$_bad_src" | grep -v -xF -- "$ROOT/src" || true)"
-# Symlinks are not followed by find (-P), but Python's entry.stat() follows
-# them. Classify each link: a symlinked directory is importable as a package
-# yet never descended into, so refuse it outright; a non-directory link is a
-# trojan vector only under an importable name (.py/.pyc/.so, as seen by the
-# import system), so benign doc/resource links cannot block startup. A broken
-# link fails target stat and is skipped, mirroring the Python OSError swallow.
+# Symlinks are not followed by find (-P). Classify each link: a symlinked
+# directory is importable as a package yet never descended into, and an
+# importable-named link (.py/.pyc/.so, as seen by the import system) resolves
+# to a target whose mode bits alone prove nothing (attacker-owned 0644, or
+# replaceable through a writable parent) — refuse both outright. A
+# non-importable link (docs, resources) cannot be imported and is skipped, so
+# benign links cannot block startup.
 _bad_links=""
 if ! _bad_links="$(find "$ROOT/src" \
   \( -name '.git' -o -name '.hg' -o -name '.pytest_cache' -o -name '.tox' \
@@ -87,12 +88,11 @@ if [ -n "$_bad_links" ]; then
     else
       case "$_link" in
       *.py | *.pyc | *.so)
-        if _mode="$(stat -L -f '%OLp' "$_link" 2>/dev/null)"; then
-          if [ $((8#$_mode & 022)) -ne 0 ]; then
-            _bad_link_targets="${_bad_link_targets:+$_bad_link_targets
+        # Importable name: refuse outright. Target mode bits prove nothing
+        # (attacker-owned 0644, or replaceable through a writable parent),
+        # so no stat check can clear it.
+        _bad_link_targets="${_bad_link_targets:+$_bad_link_targets
 }$_link"
-          fi
-        fi
         ;;
       esac
     fi
