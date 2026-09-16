@@ -13,7 +13,8 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
 - `run.sh` now recursively refuses group/world-writable `.py`/`.pyc`/`.so`
   files and descendant directories under `src/` before executing Python as
-  root, mirroring the osascript elevation preflight. A single writable module
+  root, going beyond the osascript elevation preflight (outright symlink
+  refusal, fail-closed scans). A single writable module
   nested under a 755 `src/` can no longer trojan the root import. Symlink
   targets are checked too (matching the Python scanner's following `stat`),
   the `src/` self-filter is a fixed-string match, and a scan failure aborts

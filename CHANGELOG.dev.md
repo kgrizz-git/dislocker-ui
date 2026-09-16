@@ -13,11 +13,10 @@ Version numbers match `VERSION` / SemVer with the public changelog.
 - `run.sh` recursive writable-module gate (`find "$ROOT/src"` for
   group/world-writable `.py`/`.pyc`/`.so` + directories, pruning VCS/build
   dirs); static test asserts the recursive scan.
-- Review follow-ups: symlink targets `stat -L`'d (parity with Python's
-  following `stat`; broken links skipped like the `OSError` swallow),
-  `grep -v -xF` fixed-string self-filter (a `[` in `$ROOT` previously made
-  grep fail and `|| true` discard all findings), fail-closed diagnostic when
-  `find` itself errors under `set -e`.
+- Review follow-ups: `grep -v -xF` fixed-string self-filter (a `[` in
+  `$ROOT` previously made grep fail and discard all findings; only exit
+  status 1 may now yield empty), fail-closed diagnostics when `find` itself
+  or the result filter errors under `set -e`.
 - PR review follow-ups (sourcery/greptile/sonar): refuse symlinked
   directories (package-importable, never descended), filter non-dir links by
   importable extension on the link name, fail closed on unresolvable entries

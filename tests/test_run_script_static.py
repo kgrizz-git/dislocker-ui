@@ -8,12 +8,15 @@ Overall purpose:
   model and refuse world/group-writable trees.
 
 Requirements:
-  pytest. Reads the script as text; never executes it.
+  pytest, subprocess with bash. Reads the script as text; executes only the
+  portable ``find`` expressions (BSD + GNU compatible flags) against temp
+  trees — never executes run.sh itself.
 """
 
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "run.sh"
@@ -69,3 +72,71 @@ def test_run_sh_symlink_and_filter_hardening() -> None:
     assert "stat -L" not in body
     # Unresolvable entries fail closed instead of skipping a split filename.
     assert "refusing unreadable path" in body
+
+
+def test_run_sh_drops_cwd_before_exec() -> None:
+    """`python3 -m` puts cwd on sys.path ahead of PYTHONPATH; run.sh must cd."""
+    body = _SCRIPT.read_text(encoding="utf-8")
+    assert 'cd "$ROOT"' in body
+    # The cd must precede the root exec it protects.
+    assert body.index('cd "$ROOT"') < body.index("exec python3 -m dislocker_ui")
+
+
+# Verbatim mirror of the run.sh recursive-find expression (run.sh scans for
+# writable modules). Flags used here (-prune, -o, -type, -name, -perm -020)
+# are BSD + GNU compatible. Keep in sync with run.sh when it changes.
+_FIND_MODULES = (
+    'find "{root}/src" '
+    r"\( -name '.git' -o -name '.hg' -o -name '.pytest_cache' -o -name '.tox' "
+    r"-o -name '.eggs' -o -name 'build' -o -name 'dist' -o -name 'tmp' "
+    r"-o -name '*.egg-info' \) -prune "
+    r"-o \( -type d \( -perm -020 -o -perm -002 \) -print \) "
+    r"-o \( -type f \( -name '*.py' -o -name '*.pyc' -o -name '*.so' \) "
+    r"\( -perm -020 -o -perm -002 \) -print \)"
+)
+_FIND_LINKS = (
+    'find "{root}/src" '
+    r"\( -name '.git' -o -name '.hg' -o -name '.pytest_cache' -o -name '.tox' "
+    r"-o -name '.eggs' -o -name 'build' -o -name 'dist' -o -name 'tmp' "
+    r"-o -name '*.egg-info' \) -prune -o \( -type l -print \)"
+)
+
+
+def test_run_sh_find_flags_nested_writable_module(tmp_path: Path) -> None:
+    """Behavioral: the scan expression flags a writable .py under 755 dirs."""
+    src = tmp_path / "src" / "pkg"
+    src.mkdir(parents=True)
+    bad = src / "evil.py"
+    bad.write_text("x", encoding="utf-8")
+    bad.chmod(0o664)
+    good = src / "good.py"
+    good.write_text("x", encoding="utf-8")
+    good.chmod(0o644)
+    proc = subprocess.run(
+        ["bash", "-c", _FIND_MODULES.format(root=tmp_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0
+    assert "evil.py" in proc.stdout
+    assert "good.py" not in proc.stdout
+
+
+def test_run_sh_find_lists_symlinks_for_classification(tmp_path: Path) -> None:
+    """Behavioral: the link scan surfaces symlinks for the run.sh loop."""
+    src = tmp_path / "src"
+    src.mkdir()
+    target = tmp_path / "target.py"
+    target.write_text("x", encoding="utf-8")
+    target.chmod(0o644)
+    link = src / "mod.py"
+    link.symlink_to(target)
+    proc = subprocess.run(
+        ["bash", "-c", _FIND_LINKS.format(root=tmp_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0
+    assert "mod.py" in proc.stdout

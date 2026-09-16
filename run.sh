@@ -52,9 +52,15 @@ if ! _bad_src="$(find "$ROOT/src" \
 fi
 # The top-level src/ dir was already gated above; ignore it here so the
 # recursive report lists only descendant trojan paths. Fixed-string match:
-# $ROOT may contain regex metacharacters (a broken pattern + || true would
-# silently discard every finding).
-_bad_src="$(printf '%s\n' "$_bad_src" | grep -v -xF -- "$ROOT/src" || true)"
+# $ROOT may contain regex metacharacters (a broken pattern would otherwise
+# discard findings). grep exits 1 when every line is filtered (the normal
+# empty case) but 2+ on real errors — only exit status 1 may yield empty.
+_grep_rc=0
+_bad_src="$(printf '%s\n' "$_bad_src" | grep -v -xF -- "$ROOT/src")" || _grep_rc=$?
+if [ "$_grep_rc" -gt 1 ]; then
+  echo "dislocker-ui: could not filter src/ scan results as root" >&2
+  exit 1
+fi
 # Symlinks are not followed by find (-P). Classify each link: a symlinked
 # directory is importable as a package yet never descended into, and an
 # importable-named link (.py/.pyc/.so, as seen by the import system) resolves
@@ -110,5 +116,10 @@ if [ -n "$_bad_src" ] || [ -n "$_bad_link_targets" ]; then
 fi
 
 export PYTHONPATH="${ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
-# Drop to a clean cwd; keep SUDO_UID/SUDO_GID so mounts own files as the user.
+# Drop to a clean cwd: `python3 -m` prepends cwd to sys.path ahead of
+# PYTHONPATH, so launching from an untrusted directory would shadow the
+# scanned tree with attacker modules. Modules directly under $ROOT itself
+# (e.g. sitecustomize.py) stay covered by the $ROOT writability gate above.
+# Keep SUDO_UID/SUDO_GID so mounts own files as the user.
+cd "$ROOT" || { echo "dislocker-ui: cannot enter $ROOT" >&2; exit 1; }
 exec python3 -m dislocker_ui "$@"
