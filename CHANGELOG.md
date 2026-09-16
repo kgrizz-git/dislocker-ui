@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.5.2] - 2026-09-15
+
+### Security
+
+- `run.sh` now recursively refuses group/world-writable `.py`/`.pyc`/`.so`
+  files and descendant directories under `src/` before executing Python as
+  root, going beyond the osascript elevation preflight (outright symlink
+  refusal, fail-closed scans). A single writable module nested under a 755
+  `src/` can no longer trojan the root import. The `src/` self-filter is a
+  fixed-string match, and a scan failure aborts with a diagnostic instead of
+  silently.
+- `run.sh` also gates importable files placed directly under the checkout
+  root (importable via cwd on `sys.path`) and cds into the checkout before
+  exec, so launching from an untrusted directory cannot shadow the scanned
+  tree.
+- `run.sh` symlink gate follow-ups: symlinked directories are refused
+  outright (importable as packages yet never descended into), importable
+  `.py`/`.pyc`/`.so` link names are refused outright (target mode bits prove
+  nothing: attacker-owned 0644 or replaceable via a writable parent),
+  non-importable links stay allowed so benign resource links cannot block
+  startup, and unresolvable entries fail closed.
+- Elevation request integrity is now bound to the administrator-authorized
+  command: the parent embeds the SHA-256 of the exact request bytes in the
+  osascript shell command, and the privileged child rejects any content that
+  does not match. A same-user rewrite of volume/readonly during the admin
+  prompt no longer redirects the authorized mount.
+
 ## [0.5.1] - 2026-08-12
 
 ### Security

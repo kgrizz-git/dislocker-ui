@@ -6,6 +6,37 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.5.2] - 2026-09-15
+
+### Fixed
+
+- `run.sh` recursive writable-module gate (`find "$ROOT/src"` for
+  group/world-writable `.py`/`.pyc`/`.so` + directories, pruning VCS/build
+  dirs); static test asserts the recursive scan.
+- Review follow-ups: `grep -v -xF` fixed-string self-filter (a `[` in
+  `$ROOT` previously made grep fail and discard all findings; only exit
+  status 1 may now yield empty), fail-closed diagnostics when `find` itself
+  or the result filter errors under `set -e`.
+- PR review follow-ups (sourcery/greptile/sonar): refuse symlinked
+  directories (package-importable, never descended), filter non-dir links by
+  importable extension on the link name, fail closed on unresolvable entries
+  (newline-split filenames); hoist nested calls out of `pytest.raises`
+  blocks in `tests/test_privileged.py`.
+- CodeRabbit follow-up (Critical, path traversal): refuse importable
+  `.py`/`.pyc`/`.so` link names outright instead of `stat -L` target mode
+  checks (owner-agnostic bits miss attacker-owned 0644 / writable-parent
+  replacement); `stat -L` removed from `run.sh`.
+- `_write_request` returns `(path, sha256)` computed from in-memory bytes;
+  `build_privileged_shell_command` / `_run_osascript` carry
+  `--request-sha256`; `privileged._load_and_unlink_request` verifies the
+  digest (constant-time compare) before JSON parsing.
+- Deepseek delta re-review: `cd "$ROOT"` before root exec; gate top-level
+  `$ROOT/*.py|*.pyc|*.so` (plain files mode-checked, symlinks/non-files
+  refused outright); behavioral find tests + cd ordering assertion.
+- Tests: digest binding in authorized command, invalid-digest rejection,
+  tampered-content rejection (loader + `main` end-to-end), digest-matches-bytes
+  assertion, `run.sh` recursive-scan static test.
+
 ## [0.5.1] - 2026-08-12
 
 ### Added

@@ -35,6 +35,106 @@ _check_not_group_world_writable "$ROOT"
 _check_not_group_world_writable "$ROOT/src"
 _check_not_group_world_writable "$ROOT/src/dislocker_ui/__main__.py"
 
+# Files directly under $ROOT are importable via cwd on sys.path[0] (e.g.
+# sitecustomize.py, or a top-level extension module), which the recursive
+# $ROOT/src scan does not cover. Gate importable names explicitly: anything
+# that is not a plain file (symlink, directory) is refused outright like
+# symlinks under src/; plain files must not be group/world-writable.
+for _top in "$ROOT"/*.py "$ROOT"/*.pyc "$ROOT"/*.so; do
+  # Unmatched globs expand to themselves; skip those.
+  [ -e "$_top" ] || [ -L "$_top" ] || continue
+  if [ -L "$_top" ] || [ ! -f "$_top" ]; then
+    echo "dislocker-ui: refusing non-plain-file Python module as root: $_top" >&2
+    exit 1
+  fi
+  _check_not_group_world_writable "$_top"
+done
+
+# Mirror elevate._assert_no_writable_py_files: a group-/world-writable .py,
+# .pyc, .so, or directory anywhere under src/ is a trojan module that root
+# would import via PYTHONPATH. Checking src/ itself is not enough because a
+# single file can be writable while its parent stays 755.
+if ! _bad_src="$(find "$ROOT/src" \
+  \( -name '.git' -o -name '.hg' -o -name '.pytest_cache' -o -name '.tox' \
+     -o -name '.eggs' -o -name 'build' -o -name 'dist' -o -name 'tmp' \
+     -o -name '*.egg-info' \) -prune \
+  -o \( -type d \( -perm -020 -o -perm -002 \) -print \) \
+  -o \( -type f \( -name '*.py' -o -name '*.pyc' -o -name '*.so' \) \
+     \( -perm -020 -o -perm -002 \) -print \) 2>/dev/null)"; then
+  # Fail closed with a diagnostic (set -e would otherwise abort silently).
+  echo "dislocker-ui: could not scan src/ for writable modules as root" >&2
+  exit 1
+fi
+# The top-level src/ dir was already gated above; ignore it here so the
+# recursive report lists only descendant trojan paths. Fixed-string match:
+# $ROOT may contain regex metacharacters (a broken pattern would otherwise
+# discard findings). grep exits 1 when every line is filtered (the normal
+# empty case) but 2+ on real errors — only exit status 1 may yield empty.
+_grep_rc=0
+_bad_src="$(printf '%s\n' "$_bad_src" | grep -v -xF -- "$ROOT/src")" || _grep_rc=$?
+if [ "$_grep_rc" -gt 1 ]; then
+  echo "dislocker-ui: could not filter src/ scan results as root" >&2
+  exit 1
+fi
+# Symlinks are not followed by find (-P). Classify each link: a symlinked
+# directory is importable as a package yet never descended into, and an
+# importable-named link (.py/.pyc/.so, as seen by the import system) resolves
+# to a target whose mode bits alone prove nothing (attacker-owned 0644, or
+# replaceable through a writable parent) — refuse both outright. A
+# non-importable link (docs, resources) cannot be imported and is skipped, so
+# benign links cannot block startup.
+_bad_links=""
+if ! _bad_links="$(find "$ROOT/src" \
+  \( -name '.git' -o -name '.hg' -o -name '.pytest_cache' -o -name '.tox' \
+     -o -name '.eggs' -o -name 'build' -o -name 'dist' -o -name 'tmp' \
+     -o -name '*.egg-info' \) -prune \
+  -o \( -type l -print \) 2>/dev/null)"; then
+  echo "dislocker-ui: could not scan src/ symlinks for writable targets as root" >&2
+  exit 1
+fi
+_bad_link_targets=""
+if [ -n "$_bad_links" ]; then
+  while IFS= read -r _link; do
+    [ -n "$_link" ] || continue
+    if [ ! -e "$_link" ] && [ ! -L "$_link" ]; then
+      # Unresolvable entry (e.g. a newline-split filename fragment, or a file
+      # that vanished mid-scan): the scan cannot represent it, so fail closed
+      # instead of silently skipping a possibly-writable target.
+      echo "dislocker-ui: refusing unreadable path under src/ as root" >&2
+      exit 1
+    fi
+    if [ -d "$_link" ]; then
+      _bad_link_targets="${_bad_link_targets:+$_bad_link_targets
+}$_link"
+    else
+      case "$_link" in
+      *.py | *.pyc | *.so)
+        # Importable name: refuse outright. Target mode bits prove nothing
+        # (attacker-owned 0644, or replaceable through a writable parent),
+        # so no stat check can clear it.
+        _bad_link_targets="${_bad_link_targets:+$_bad_link_targets
+}$_link"
+        ;;
+      esac
+    fi
+  done <<< "$_bad_links"
+fi
+if [ -n "$_bad_src" ] || [ -n "$_bad_link_targets" ]; then
+  echo "dislocker-ui: refusing group/world-writable Python module under src/ as root:" >&2
+  if [ -n "$_bad_src" ]; then
+    printf '%s\n' "$_bad_src" >&2
+  fi
+  if [ -n "$_bad_link_targets" ]; then
+    printf '%s\n' "$_bad_link_targets" >&2
+  fi
+  exit 1
+fi
+
 export PYTHONPATH="${ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
-# Drop to a clean cwd; keep SUDO_UID/SUDO_GID so mounts own files as the user.
+# Drop to a clean cwd: `python3 -m` prepends cwd to sys.path ahead of
+# PYTHONPATH, so launching from an untrusted directory would shadow the
+# scanned tree with attacker modules. Modules directly under $ROOT itself
+# (e.g. sitecustomize.py) stay covered by the $ROOT writability gate above.
+# Keep SUDO_UID/SUDO_GID so mounts own files as the user.
+cd "$ROOT" || { echo "dislocker-ui: cannot enter $ROOT" >&2; exit 1; }
 exec python3 -m dislocker_ui "$@"
