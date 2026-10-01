@@ -13,6 +13,11 @@ Open work only for **dislocker-ui**.
 
 ## Active
 
+- [Stale session unmount fixes](plans/2026-10-01-stale-session-unmount.md):
+  make unmount idempotent (stale sessions stop wedging Mount/Unmount
+  forever), verify raw-disk identity before `hdiutil detach` (never eject
+  a reassigned device), detect fully-stale sessions at mount time, and
+  add real step-level tests plus changelog/README updates. Target 0.5.3.
 - [Privileged helper hardening](plans/2026-08-05-privileged-helper-hardening.md):
   remediate the security audit findings in the elevated mount/unmount workflow.
   - Follow-up (reviews 2026-09-15/16, deferred deliberately): the osascript
