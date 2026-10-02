@@ -26,6 +26,11 @@ disk attach, and the `/Volumes` mount), then:
    physical drive (device numbers are reassigned after reboot). The drive
    re-enumerated as `/dev/disk6`; `/dev/disk5` no longer existed.
 
+4. The incident left `/Volumes/DislockerUI` and `/Volumes/DislockerUI-2`
+   as empty root-owned dirs (verified 2026-10-02):
+   `_remove_empty_ntfs_dir` never ran because unmount errored first —
+   consistent with the wedge mechanics above.
+
 The only escape today is manual `sudo rm` of the root-owned 0600 session
 file in Application Support. Existing tests mock the individual unmount
 steps (tests/test_runner_elevation.py:169-171), so this scenario was never
@@ -68,14 +73,27 @@ retain-for-retry behavior for genuinely stuck mounts (busy volume, etc.).
    detach" and return `[]` (not an error — the goal state is "not
    attached").
 
-Path comparison must normalize the macOS `/tmp` → `/private/tmp` style
-prefix difference (`Path.resolve()` on both sides) before matching. If the
-device is absent from the image list (detached, or now a *physical* disk),
-skip — this is exactly the guard that prevents ejecting a reassigned
-device like the 2026-10-01 incident.
+Path comparison must normalize two things before matching:
+URL-encoding (`hdiutil info -plist` emits `image-path` percent-encoded,
+e.g. `Kiro%20CLI.dmg` — verified 2026-10-02 via plistlib, and
+`Path.resolve()` does NOT decode `%20`, so apply
+`urllib.parse.unquote()` first) and the macOS `/tmp` → `/private/tmp`
+style prefix difference (`Path.resolve()` on both sides, after
+unquoting). If the device is absent from the image list (detached, or now
+a *physical* disk), skip — this is exactly the guard that prevents
+ejecting a reassigned device like the 2026-10-01 incident.
 
 Fallback (`detach -force`) only runs after identity verification passes.
 Both attempts must clear the same identity gate.
+
+### D2b: Same gate in `_best_effort_cleanup` (mount-failure path)
+
+`_best_effort_cleanup` (runner.py:613-620) runs
+`hdiutil detach -force <raw_disk>` with no identity check — the same
+reassigned-device hole as the unmount path, reachable when a mount fails
+after attach. Reuse the `_attached_disk_images` helper there: skip the
+detach when the device is absent from the image list or its image-path
+mismatches. (Force-detaching a verified-own image stays fine.)
 
 ### D3: Staleness detection at mount time
 
@@ -86,7 +104,10 @@ list (via the D2 helper).
 
 - `mount_volume` pre-check and `_validate_mount_request`: when the loaded
   session is stale, log a notice, clear the session, and proceed with the
-  mount instead of raising.
+  mount instead of raising. (`_validate_mount_request` is not dead code:
+  under `sudo ./run.sh` the euid is 0 so `needs_elevation()` is False and
+  the `mount_volume` pre-check at 107-119 is skipped — `_validate_mount_request`
+  is then the *only* gate on that path. Both wirings are required.)
 - **Elevated sessions:** the unprivileged GUI can read but not delete the
   root-owned session file. When `needs_elevation()` and the session is
   stale, the stale-clearing must happen inside the privileged child (which
@@ -130,7 +151,10 @@ freeze — tracked as a stretch item.
       matching `disks.py` style).
 - [ ] Rewrite `_detach_raw_disk`: identity check (D2) before both the
       primary and force attempts; log-and-skip on mismatch/absence.
-- [ ] Normalize paths before comparing (`Path.resolve()` both sides).
+- [ ] Normalize paths before comparing (`urllib.parse.unquote()` then
+      `Path.resolve()` both sides — resolve alone preserves `%20`).
+- [ ] Apply the same identity gate to `_best_effort_cleanup` (D2b):
+      skip the force-detach when the device is absent or mismatched.
 
 ### 3. `runner.py` — staleness detection
 
@@ -156,10 +180,19 @@ boundary, not by mocking the steps themselves):
       then force-fallback path).
 - [ ] Path normalization: `/tmp/...` vs `/private/tmp/...` image-path
       match.
+- [ ] URL-decoding: percent-encoded image-path (`Kiro%20CLI.dmg`) matches
+      a session path with a literal space.
+- [ ] `_best_effort_cleanup` identity gate: absent/mismatched raw_disk →
+      no detach subprocess; matching image → force-detach runs.
 - [ ] Mount with stale session proceeds and clears the session file.
 - [ ] Mount with live session still blocks.
 - [ ] Elevated stale-session branch (per D3 decision, whichever shape it
-      takes).
+      takes): staleness re-validated inside the root child
+      (`privileged.py` → `unmount_volume`); an unprivileged verdict alone
+      never deletes root-owned state.
+- [ ] Note: when `needs_elevation()` is true, `unmount_volume` ignores a
+      passed `session_path` (runner.py:264-266) — stale tests must stage
+      the canonical per-user path, not a tmp path.
 
 ### 5. Docs
 

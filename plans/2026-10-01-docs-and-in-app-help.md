@@ -61,7 +61,9 @@ covering, in error-message-first order:
   `sudo rm "$HOME/Library/Application Support/dislocker-ui/active_session.json"`
   (and the root-state variant under `/var/db/dislocker-ui/<uid>/` for
   elevated sessions). Note that 0.5.3+ self-heals (cross-reference
-  `plans/2026-10-01-stale-session-unmount.md`).
+  `plans/2026-10-01-stale-session-unmount.md`). Mention that leftover
+  empty `/Volumes/DislockerUI*` dirs are harmless — 0.5.3+ removes them
+  on successful unmount.
 - **"Missing required tools"** — one-line pointer to the install section
   and `scripts/install-root-deps.sh`.
 - **"NTFS volume requires ntfs-3g"** — FAT/ExFAT works without it.
@@ -131,6 +133,8 @@ whichever lands second reconciles the text.
       - `help_text` constants: non-empty, contain the manual-recovery
         command, contain no absolute `/Users/…` paths (mirrors the
         absolute-path policy) and no secrets.
+      - Status label refreshes after a stale-session clear (no active
+        session → "No active session").
 - [ ] Gates: `python3 -m compileall -q src`, ruff check + format,
       `pytest --cov` (≥80%), `python3 hooks/check_file_size.py`,
       `python3 hooks/check_absolute_paths.py`.
