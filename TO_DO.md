@@ -13,6 +13,11 @@ Open work only for **dislocker-ui**.
 
 ## Active
 
+- [Documentation and in-app help](plans/2026-10-01-docs-and-in-app-help.md):
+  add README Troubleshooting section (stale-session recovery, missing
+  tools, macFUSE/TCC, mbedtls symlink), and a minimal in-app Help menu
+  (About / Usage / Troubleshooting) with text in a new `help_text.py`.
+  Coordinate troubleshooting wording with the stale-session plan.
 - [Stale session unmount fixes](plans/2026-10-01-stale-session-unmount.md):
   make unmount idempotent (stale sessions stop wedging Mount/Unmount
   forever), verify raw-disk identity before `hdiutil detach` (never eject
