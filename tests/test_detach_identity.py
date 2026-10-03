@@ -323,6 +323,39 @@ def test_best_effort_cleanup_skips_unverified_detach(tmp_path: Path) -> None:
     assert any("left attached" in line for line in logs)
 
 
+def test_best_effort_cleanup_skips_when_info_unavailable(tmp_path: Path) -> None:
+    """Cleanup detaches nothing when the image list cannot be read."""
+    with _fuse_dir() as fuse:
+        marker = tmp_path / "active_session.json"
+        marker.write_text("{}")
+        logs: list[str] = []
+        run = _detach_responder(info_rc=1)
+        with patch("dislocker_ui.runner.subprocess.run", run):
+            _best_effort_cleanup(
+                fuse, tmp_path / "Nope", "/dev/disk9", logs.append, session_path=marker
+            )
+    assert not marker.exists()
+    assert _detach_calls(run) == []
+    assert any("left attached" in line for line in logs)
+
+
+def test_best_effort_cleanup_skips_different_image(tmp_path: Path) -> None:
+    """Cleanup detaches nothing when the device holds another image."""
+    with _fuse_dir() as fuse:
+        marker = tmp_path / "active_session.json"
+        marker.write_text("{}")
+        logs: list[str] = []
+        other = _image_entry(str(Path("/tmp") / "other-dislocker" / "dislocker-file"), "/dev/disk9")
+        run = _detach_responder(info_images=[other])
+        with patch("dislocker_ui.runner.subprocess.run", run):
+            _best_effort_cleanup(
+                fuse, tmp_path / "Nope", "/dev/disk9", logs.append, session_path=marker
+            )
+    assert not marker.exists()
+    assert _detach_calls(run) == []
+    assert any("left attached" in line for line in logs)
+
+
 def test_best_effort_cleanup_detaches_verified_image(tmp_path: Path) -> None:
     """Cleanup force-detaches a disk verified as our image."""
     with _fuse_dir() as fuse:
