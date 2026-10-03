@@ -81,6 +81,38 @@ def remove_empty_privileged_staging_parents(fuse_path: Path, session_path: Path 
         staging.parent.rmdir()
 
 
+def is_unprivileged_fuse_path(path: Path) -> bool:
+    """Return whether *path* is a direct, non-symlink tempdir child we created."""
+    try:
+        tmp = Path(tempfile.gettempdir()).resolve()
+        return (
+            path.parent.resolve() == tmp
+            and path.name.startswith("dislocker-ui-")
+            and not path.is_symlink()
+        )
+    except OSError:
+        return False
+
+
+def unprivileged_session_error(session: MountSession) -> str | None:
+    """Return a non-elevated-session cleanup validation error, if any."""
+    if not is_physical_volume(session.raw_disk):
+        return "Session has an invalid raw disk selector"
+    if not is_unprivileged_fuse_path(Path(session.fuse_mount)):
+        return "Session FUSE path is outside the temporary directory"
+    ntfs = Path(session.ntfs_mount)
+    if ntfs.parent != VOLUMES_ROOT or ntfs.name in {"", ".", ".."}:
+        return "Session NTFS mountpoint is unsafe"
+    return None
+
+
+def session_paths_error(session: MountSession, session_path: Path | None) -> str | None:
+    """Return a session cleanup validation error, if any, for either session kind."""
+    if session.elevated:
+        return elevated_session_error(session, session_path)
+    return unprivileged_session_error(session)
+
+
 def elevated_session_error(session: MountSession, session_path: Path | None) -> str | None:
     """Return an elevated-session cleanup validation error, if any."""
     if not is_physical_volume(session.volume) or not is_physical_volume(session.raw_disk):

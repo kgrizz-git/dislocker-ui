@@ -138,12 +138,19 @@ def save_session(
         raise
 
 
-def load_session(path: Path | None = None) -> MountSession | None:
-    """Load a strictly shaped session, or return ``None`` when unavailable."""
+def load_session(
+    path: Path | None = None, *, require_owner: int | None = None
+) -> MountSession | None:
+    """Load a strictly shaped session, or return ``None`` when unavailable.
+
+    When *require_owner* is set, files not owned by that uid are rejected.
+    """
     target = path or default_session_path()
     try:
         info = os.lstat(target)
         if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            return None
+        if require_owner is not None and info.st_uid != require_owner:
             return None
         raw = json.loads(target.read_text(encoding="utf-8"))
         expected = set(MountSession.__dataclass_fields__)

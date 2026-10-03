@@ -43,8 +43,8 @@ from dislocker_ui.mount_policy import (
     VOLUMES_ROOT,
     allocate_privileged_fuse_path,
     elevated_request_error,
-    elevated_session_error,
     is_safe_volume_label,
+    session_paths_error,
 )
 from dislocker_ui.ntfs_mount import assert_mount_owner as _assert_mount_owner
 from dislocker_ui.ntfs_mount import mount_ntfs as _mount_ntfs
@@ -52,6 +52,7 @@ from dislocker_ui.session import (
     MountSession,
     active_session_path_for_user,
     clear_session,
+    default_session_path,
     legacy_session_present,
     load_session,
     save_session,
@@ -268,7 +269,10 @@ def unmount_volume(
     canonical_path = (
         (session_path or active_session_path_for_user()) if needs_elevation() else session_path
     )
-    session = load_session(canonical_path)
+    # A root-owned session file must actually be owned by root; the
+    # unprivileged GUI status read keeps working without the check.
+    require_owner: int | None = 0 if os.geteuid() == 0 else None
+    session = load_session(canonical_path, require_owner=require_owner)
     if session is None:
         # Probe the old user-owned path, never the trusted canonical state path.
         if legacy_session_present():
@@ -280,10 +284,9 @@ def unmount_volume(
             run_elevated_unmount(log, log_path=log_path)
         return
 
-    if session.elevated:
-        error = elevated_session_error(session, session_path)
-        if error:
-            raise RunnerError(error)
+    error = session_paths_error(session, session_path)
+    if error:
+        raise RunnerError(f"{error}. {_manual_session_cleanup_hint(canonical_path)}")
     errors: list[str] = []
     errors.extend(_unmount_ntfs(deps, session, log))
     errors.extend(_detach_raw_disk(deps, session, log))
@@ -301,6 +304,15 @@ def unmount_volume(
         raise RunnerError("Unmount incomplete; state was retained for retry:\n" + "\n".join(errors))
     else:
         log("Unmounted successfully")
+
+
+def _manual_session_cleanup_hint(canonical_path: Path | None) -> str:
+    """Point at the session file the operator must remove by hand."""
+    target = canonical_path or default_session_path()
+    return (
+        "The session was left untouched for safety. Unmount the volume manually, "
+        f"detach its raw disk, then remove {target} before mounting again."
+    )
 
 
 def _legacy_session_recovery_message() -> str:
