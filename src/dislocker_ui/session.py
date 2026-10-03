@@ -147,12 +147,20 @@ def load_session(
     """
     target = path or default_session_path()
     try:
-        info = os.lstat(target)
-        if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        return None
+    try:
+        # Regular-file and ownership checks run on the open descriptor, so a
+        # same-user swap between check and read cannot redirect the load.
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
             return None
         if require_owner is not None and info.st_uid != require_owner:
             return None
-        raw = json.loads(target.read_text(encoding="utf-8"))
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            fd = -1
+            raw = json.load(handle)
         expected = set(MountSession.__dataclass_fields__)
         if not isinstance(raw, dict) or set(raw) != expected:
             return None
@@ -178,6 +186,10 @@ def load_session(
         return session
     except (OSError, json.JSONDecodeError, TypeError, KeyError):
         return None
+    finally:
+        if fd >= 0:
+            with contextlib.suppress(OSError):
+                os.close(fd)
 
 
 def session_owner_mismatch(path: Path | None = None, uid: int = 0) -> bool:

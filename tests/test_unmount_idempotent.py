@@ -17,6 +17,7 @@ import errno
 import os
 import plistlib
 import shutil
+import subprocess
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -117,11 +118,15 @@ def test_mounted_paths_parses_mount_table() -> None:
 
 
 def test_mounted_paths_returns_none_when_listing_fails() -> None:
-    """A failed or unrunnable /sbin/mount reports an unknown table."""
+    """A failed, hung, or unrunnable /sbin/mount reports an unknown table."""
     with patch("subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr="x")):
         assert _mounted_paths() is None
     with patch("subprocess.run", side_effect=OSError("no mount")):
         assert _mounted_paths() is None
+    expired = subprocess.TimeoutExpired(["/sbin/mount"], 10)
+    with patch("subprocess.run", side_effect=expired) as run:
+        assert _mounted_paths() is None
+    assert run.call_args.kwargs["timeout"] == 10
 
 
 def test_is_mounted_matches_exact_and_aliased_paths() -> None:
@@ -227,6 +232,41 @@ def test_unmount_removes_empty_volumes_dir(tmp_path: Path, monkeypatch: pytest.M
             _unmount_session_file(stored, [])
     assert not stored.exists()
     assert not ntfs.exists()
+
+
+def test_unmount_refuses_reassigned_ntfs_device(tmp_path: Path) -> None:
+    """A mountpoint now held by another disk retains state without umount."""
+    with _fuse_dir() as fuse:
+        session = _session(fuse_mount=str(fuse))
+        stored = _stored_session(tmp_path, session)
+        table = f"/dev/disk5 on {session.ntfs_mount} (apfs, local, journaled)\n"
+        run = _mount_responder(table=table)
+        with (
+            patch("dislocker_ui.unmount_steps.subprocess.run", run),
+            pytest.raises(RunnerError, match="different disk"),
+        ):
+            _unmount_session_file(stored, [])
+    assert stored.exists()
+    assert [c for c in run.call_args_list if c.args[0][0] == _UMOUNT] == []
+
+
+def test_unmount_allows_own_partition_and_fuse_devices(tmp_path: Path) -> None:
+    """The recorded disk, its partitions, and FUSE devices still unmount."""
+    cases = [
+        "/dev/disk9",  # the recorded raw disk itself
+        "/dev/disk9s2",  # a partition of the recorded disk
+        "dislocker-fuse@macfuse0",  # FUSE device strings carry no disk number
+    ]
+    for device in cases:
+        with _fuse_dir() as fuse:
+            session = _session(fuse_mount=str(fuse))
+            stored = _stored_session(tmp_path, session)
+            table = f"{device} on {session.ntfs_mount} (msdos, local, noowners)\n"
+            run = _mount_responder(table=table)
+            with patch("dislocker_ui.unmount_steps.subprocess.run", run):
+                _unmount_session_file(stored, [])
+        assert not stored.exists(), device
+        assert [_UMOUNT, session.ntfs_mount] in [c.args[0] for c in run.call_args_list], device
 
 
 def test_unmount_nonempty_unmounted_volumes_dir_warns_and_clears(

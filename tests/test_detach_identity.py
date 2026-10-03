@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import plistlib
 import shutil
+import subprocess
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -144,11 +145,15 @@ def test_attached_disk_images_maps_every_entity() -> None:
 
 
 def test_attached_disk_images_returns_none_on_failure() -> None:
-    """A failed, unrunnable, or malformed listing reports unknown state."""
+    """A failed, hung, unrunnable, or malformed listing reports unknown state."""
     with patch("subprocess.run", return_value=MagicMock(returncode=1, stdout=b"", stderr=b"x")):
         assert _attached_disk_images(_HDIUTIL) is None
     with patch("subprocess.run", side_effect=OSError("no hdiutil")):
         assert _attached_disk_images(_HDIUTIL) is None
+    expired = subprocess.TimeoutExpired([_HDIUTIL, "info", "-plist"], 10)
+    with patch("subprocess.run", side_effect=expired) as run:
+        assert _attached_disk_images(_HDIUTIL) is None
+    assert run.call_args.kwargs["timeout"] == 10
     with patch(
         "subprocess.run", return_value=MagicMock(returncode=0, stdout=b"garbage", stderr=b"")
     ):

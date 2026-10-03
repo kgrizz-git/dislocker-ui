@@ -394,6 +394,10 @@ def _validate_mount_request(
         if session_targets_gone(existing, deps.hdiutil or "/usr/bin/hdiutil", session_path):
             log(f"Stale session for {existing.ntfs_mount} found; clearing it automatically…")
             clear_session(session_path)
+            # Drop the leftover empty mountpoint dir so the fresh mount does
+            # not shift to a "-2" suffixed path. Anything left inside is only
+            # warned about; errors here never block the new mount.
+            _remove_empty_ntfs_dir(existing.ntfs_mount, log)
         else:
             raise RunnerError(
                 "A session is already active. Click Unmount before mounting again.\n"

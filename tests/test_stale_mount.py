@@ -54,7 +54,7 @@ def _req(volume: str) -> MountRequest:
     )
 
 
-def _stale_session(*, raw_disk: str = "/dev/disk9") -> MountSession:
+def _stale_session(*, raw_disk: str = "/dev/disk9", ntfs_mount: str = _NTFS_MOUNT) -> MountSession:
     """Build a validation-passing session whose targets are gone."""
     fuse_mount = str(Path(tempfile.gettempdir()) / "dislocker-ui-gone")
     return MountSession(
@@ -62,7 +62,7 @@ def _stale_session(*, raw_disk: str = "/dev/disk9") -> MountSession:
         fuse_mount=fuse_mount,
         dislocker_file=fuse_mount + "/dislocker-file",
         raw_disk=raw_disk,
-        ntfs_mount=_NTFS_MOUNT,
+        ntfs_mount=ntfs_mount,
         readonly=True,
         used_ntfs3g=True,
         elevated=False,
@@ -171,6 +171,26 @@ def test_validate_mount_request_clears_stale_elevated_session(
         )
     assert not session_path.exists()
     assert any("Stale session" in line for line in logs)
+
+
+def test_validate_mount_request_clears_empty_ntfs_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Self-heal removes the leftover empty mountpoint so labels don't shift."""
+    volumes = tmp_path / "Volumes"
+    volumes.mkdir()
+    monkeypatch.setattr("dislocker_ui.mount_policy.VOLUMES_ROOT", volumes)
+    ntfs = volumes / "DislockerUI"
+    ntfs.mkdir()
+    stored = _stored_session(tmp_path, _stale_session(ntfs_mount=str(ntfs)))
+    run = _stale_responder()
+    with (
+        _volume(tmp_path) as volume,
+        patch("dislocker_ui.unmount_steps.subprocess.run", run),
+    ):
+        _validate_mount_request(_req(volume), _deps(), lambda _m: None, session_path=stored)
+    assert not stored.exists()
+    assert not ntfs.exists()
 
 
 def test_validate_mount_request_blocks_live_session(tmp_path: Path) -> None:

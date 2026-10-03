@@ -73,6 +73,83 @@ def _unmount_session_file(session_path: Path, logs: list[str]) -> None:
 
 
 @contextlib.contextmanager
+def _fake_root_owned(path: Path) -> Iterator[None]:
+    """Report *path* as uid-0-owned through os.open/os.fstat (root simulation)."""
+    real_open, real_fstat = os.open, os.fstat
+    owned: set[int] = set()
+
+    def _open(file: object, flags: int, *args: object, **kwargs: object) -> int:
+        fd = real_open(file, flags, *args, **kwargs)  # type: ignore[arg-type]
+        if isinstance(file, str | bytes | os.PathLike) and os.path.abspath(file) == str(path):
+            owned.add(fd)
+        return fd
+
+    def _fstat(fd: int) -> os.stat_result:
+        st = real_fstat(fd)
+        if fd in owned:
+            st = os.stat_result(
+                (
+                    st.st_mode,
+                    st.st_ino,
+                    st.st_dev,
+                    st.st_nlink,
+                    0,
+                    st.st_gid,
+                    st.st_size,
+                    st.st_atime,
+                    st.st_mtime,
+                    st.st_ctime,
+                )
+            )
+        return st
+
+    with patch("os.open", side_effect=_open), patch("os.fstat", side_effect=_fstat):
+        yield
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="needs a non-root file owner")
+def test_unmount_as_root_accepts_root_looking_session(tmp_path: Path) -> None:
+    """Running as root, a root-owned session file unmounts normally."""
+    fuse = Path(tempfile.mkdtemp(prefix="dislocker-ui-"))
+    stored = _stored_session(tmp_path, _session(fuse_mount=str(fuse)))
+    table = f"/dev/disk9 on {fuse} (msdos, local, noowners)\n"
+    images = [
+        {
+            "image-path": str(fuse / "dislocker-file"),
+            "system-entities": [{"dev-entry": "/dev/disk9"}],
+        }
+    ]
+    mount_result = MagicMock(returncode=0, stdout=table, stderr="")
+    info_result = MagicMock(returncode=0, stdout=plistlib.dumps({"images": images}), stderr=b"")
+    ok = MagicMock(returncode=0, stdout="", stderr="")
+    run = MagicMock(
+        side_effect=lambda cmd, **kwargs: (
+            mount_result
+            if cmd[:1] == ["/sbin/mount"]
+            else info_result
+            if cmd[1:3] == ["info", "-plist"]
+            else ok
+        )
+    )
+    logs: list[str] = []
+    try:
+        with (
+            patch("os.geteuid", return_value=0),
+            patch("dislocker_ui.elevate.needs_elevation", return_value=False),
+            patch("dislocker_ui.runner.legacy_session_present", return_value=False),
+            patch("dislocker_ui.unmount_steps.subprocess.run", run),
+            _fake_root_owned(stored),
+        ):
+            unmount_volume(_deps(), logs.append, session_path=stored)
+    finally:
+        shutil.rmtree(fuse, ignore_errors=True)
+    assert not stored.exists()
+    assert ["/bin/umount", str(fuse)] in [c.args[0] for c in run.call_args_list]
+    assert ["/bin/hdiutil", "detach", "/dev/disk9"] in [c.args[0] for c in run.call_args_list]
+    assert any("Unmounted successfully" in line for line in logs)
+
+
+@contextlib.contextmanager
 def _guarded_boundaries() -> Iterator[tuple[MagicMock, MagicMock, MagicMock]]:
     """Patch subprocess/shutil/rmdir boundaries; yield the mocks."""
     run = MagicMock()

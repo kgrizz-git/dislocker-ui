@@ -295,7 +295,8 @@ boundary, not by mocking the steps themselves):
       cleanly, session file is deleted, no subprocess detach/umount of
       unrelated devices.
 - [x] Live mount unmount still retains state on failure (busy volume
-      simulated via `_run` raising) — preserves retry semantics.
+      simulated via failing umount/detach subprocesses) — preserves retry
+      semantics.
 - [x] Detach identity gate: `hdiutil info` shows the device as a physical
       disk / different image → detach skipped, no error.
 - [x] Detach identity gate: image-path matches → detach runs (primary,

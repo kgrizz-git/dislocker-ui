@@ -84,26 +84,34 @@ def _run_with_fallback(
     return []
 
 
-def _mounted_paths() -> set[str] | None:
-    """Parse ``/sbin/mount`` output into mounted paths; None when unavailable."""
+def _mount_table() -> dict[str, str] | None:
+    """Parse ``/sbin/mount`` into {mountpoint: device}; None when unavailable."""
     try:
-        proc = subprocess.run(["/sbin/mount"], check=False, capture_output=True, text=True)
-    except OSError:
+        proc = subprocess.run(
+            ["/sbin/mount"], check=False, capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.TimeoutExpired):
         return None
     if proc.returncode != 0:
         return None
-    paths: set[str] = set()
+    table: dict[str, str] = {}
     for line in proc.stdout.splitlines():
         # "<dev> on <path> (<fstype>, ...)"; our paths are app-generated, so
         # splitting on these separators is safe.
-        _, on_sep, rest = line.partition(" on ")
+        dev, on_sep, rest = line.partition(" on ")
         if not on_sep:
             continue
         pieces = rest.rsplit(" (", 1)
         if len(pieces) != 2 or not pieces[0]:
             continue
-        paths.add(pieces[0])
-    return paths
+        table[pieces[0]] = dev
+    return table
+
+
+def _mounted_paths() -> set[str] | None:
+    """Return the mounted paths; None when the table is unavailable."""
+    table = _mount_table()
+    return set(table) if table is not None else None
 
 
 def _is_mounted(path: str) -> bool:
@@ -131,6 +139,18 @@ def _unmount_ntfs(deps: DepsStatus, session: MountSession, log: LogFn) -> list[s
     if not _is_mounted(session.ntfs_mount):
         log(f"already unmounted: {session.ntfs_mount}")
         return []
+    # A reassigned /Volumes mountpoint may now belong to another disk;
+    # unmounting it would yank someone else's volume (non-/dev devices from
+    # ntfs-3g/macFUSE carry no device number and keep the old behavior).
+    device = (_mount_table() or {}).get(session.ntfs_mount)
+    if (
+        device is not None
+        and device.startswith("/dev/disk")
+        and device != session.raw_disk
+        and not device.startswith(session.raw_disk + "s")
+    ):
+        log(f"{session.ntfs_mount} is now a different disk ({device}); not unmounting")
+        return [f"NTFS mountpoint {session.ntfs_mount} is now a different disk ({device})"]
     log(f"Unmounting volume at {session.ntfs_mount}…")
     return _run_with_fallback(
         [deps.umount, session.ntfs_mount],
@@ -146,8 +166,10 @@ def _attached_disk_images(hdiutil: str) -> dict[str, str] | None:
     partition nodes alike). Returns None when the listing is unavailable.
     """
     try:
-        proc = subprocess.run([hdiutil, "info", "-plist"], check=False, capture_output=True)
-    except OSError:
+        proc = subprocess.run(
+            [hdiutil, "info", "-plist"], check=False, capture_output=True, timeout=10
+        )
+    except (OSError, subprocess.TimeoutExpired):
         return None
     if proc.returncode != 0:
         return None

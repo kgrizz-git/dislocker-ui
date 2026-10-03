@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
+import plistlib
+from collections.abc import Iterator
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +15,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from dislocker_ui.deps import DepsStatus
+from dislocker_ui.mount_policy import privileged_staging_dir
 from dislocker_ui.privileged import (
     EXIT_RUNNER,
     EXIT_VALIDATION,
@@ -23,6 +28,7 @@ from dislocker_ui.privileged import (
     _ValidationError,
 )
 from dislocker_ui.runner import RunnerError
+from dislocker_ui.session import MountSession, save_session
 
 
 def _payload() -> dict[str, object]:
@@ -457,3 +463,116 @@ def test_main_unmount_uses_canonical_session(tmp_path: Path) -> None:
             == EXIT_OK
         )
     assert unmount.call_args.kwargs["session_path"] == state / "active_session.json"
+
+
+@contextlib.contextmanager
+def _fake_root_owned(path: Path) -> Iterator[None]:
+    """Report *path* as uid-0-owned through os.open/os.fstat (root simulation)."""
+    real_open, real_fstat = os.open, os.fstat
+    owned: set[int] = set()
+
+    def _open(file: object, flags: int, *args: object, **kwargs: object) -> int:
+        fd = real_open(file, flags, *args, **kwargs)  # type: ignore[arg-type]
+        if isinstance(file, str | bytes | os.PathLike) and os.path.abspath(file) == str(path):
+            owned.add(fd)
+        return fd
+
+    def _fstat(fd: int) -> os.stat_result:
+        st = real_fstat(fd)
+        if fd in owned:
+            st = os.stat_result(
+                (
+                    st.st_mode,
+                    st.st_ino,
+                    st.st_dev,
+                    st.st_nlink,
+                    0,
+                    st.st_gid,
+                    st.st_size,
+                    st.st_atime,
+                    st.st_mtime,
+                    st.st_ctime,
+                )
+            )
+        return st
+
+    with patch("os.open", side_effect=_open), patch("os.fstat", side_effect=_fstat):
+        yield
+
+
+def test_main_unmount_clears_stale_elevated_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Root-child unmount drives the real unmount_volume for a stale session."""
+    base = tmp_path / "requests"
+    base.mkdir(mode=0o700)
+    request = _request(base, {"action": "unmount", "uid": os.getuid(), "gid": os.getgid()})
+    state = tmp_path / "501"
+    state.mkdir()
+    session_file = state / "active_session.json"
+    fuse = privileged_staging_dir(session_file, 501) / "session-test"
+    volumes = tmp_path / "Volumes"
+    volumes.mkdir()
+    monkeypatch.setattr("dislocker_ui.mount_policy.VOLUMES_ROOT", volumes)
+    save_session(
+        MountSession(
+            volume="/dev/disk2s1",
+            fuse_mount=str(fuse),
+            dislocker_file=str(fuse / "dislocker-file"),
+            raw_disk="/dev/disk9",
+            ntfs_mount=str(volumes / "USB"),
+            readonly=True,
+            used_ntfs3g=True,
+            elevated=True,
+        ),
+        session_file,
+    )
+    log = MagicMock()
+    deps = DepsStatus(
+        dislocker_fuse="/bin/dislocker-fuse",
+        hdiutil="/bin/hdiutil",
+        diskutil="/bin/diskutil",
+        umount="/bin/umount",
+        ntfs3g="/bin/ntfs-3g",
+    )
+    mount_result = MagicMock(returncode=0, stdout="", stderr="")
+    info_result = MagicMock(returncode=0, stdout=plistlib.dumps({"images": []}), stderr=b"")
+    ok = MagicMock(returncode=0, stdout="", stderr="")
+
+    def _fake(cmd: list[str], **kwargs: object) -> MagicMock:
+        if cmd[:1] == ["/sbin/mount"]:
+            return mount_result
+        if cmd[1:3] == ["info", "-plist"]:
+            return info_result
+        return ok
+
+    with (
+        patch("dislocker_ui.privileged._user_base", return_value=base),
+        patch("dislocker_ui.privileged.ensure_root_state_dir", return_value=state),
+        patch("dislocker_ui.privileged.root_session_path", return_value=session_file),
+        patch("dislocker_ui.privileged.root_log_path", return_value=state / "operation.log"),
+        patch("dislocker_ui.privileged._open_root_log", return_value=log),
+        patch("dislocker_ui.privileged.discover_privileged_deps", return_value=deps),
+        patch("dislocker_ui.elevate.needs_elevation", return_value=False),
+        patch("os.geteuid", return_value=0),
+        patch("subprocess.run", side_effect=_fake),
+        _fake_root_owned(session_file),
+    ):
+        from dislocker_ui.privileged import EXIT_OK, main
+
+        assert (
+            main(
+                [
+                    "unmount",
+                    "--uid",
+                    str(os.getuid()),
+                    "--request",
+                    str(request),
+                    "--request-sha256",
+                    _digest_of(request),
+                ]
+            )
+            == EXIT_OK
+        )
+    assert not session_file.exists()
+    assert any("privileged unmount ok" in call.args[0] for call in log.write.call_args_list)
