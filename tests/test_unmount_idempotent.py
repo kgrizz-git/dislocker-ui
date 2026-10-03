@@ -213,6 +213,22 @@ def test_unmount_live_failure_retains_session(tmp_path: Path) -> None:
     assert stored.exists()
 
 
+def test_unmount_removes_empty_volumes_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An empty stale /Volumes dir is removed and state clears."""
+    volumes = tmp_path / "Volumes"
+    volumes.mkdir()
+    monkeypatch.setattr("dislocker_ui.mount_policy.VOLUMES_ROOT", volumes)
+    ntfs = volumes / "DislockerUI"
+    ntfs.mkdir()
+    with _fuse_dir() as fuse:
+        stored = _stored_session(tmp_path, _session(fuse_mount=str(fuse), ntfs_mount=str(ntfs)))
+        run = _mount_responder()
+        with patch("dislocker_ui.unmount_steps.subprocess.run", run):
+            _unmount_session_file(stored, [])
+    assert not stored.exists()
+    assert not ntfs.exists()
+
+
 def test_unmount_nonempty_unmounted_volumes_dir_warns_and_clears(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

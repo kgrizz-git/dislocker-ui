@@ -68,6 +68,7 @@ from dislocker_ui.unmount_steps import (
     _remove_fuse_dir,
     _unmount_fuse,
     _unmount_ntfs,
+    session_targets_gone,
 )
 from dislocker_ui.unmount_steps import _run as _run
 from dislocker_ui.unmount_steps import _run_with_fallback as _run_with_fallback
@@ -118,7 +119,14 @@ def mount_volume(
         # credentials — the child would reject it anyway (exit 3).
         canonical_path = session_path or active_session_path_for_user()
         existing = load_session(canonical_path)
-        if existing is not None:
+        # Advisory only: a stale-looking session does not block here (and is
+        # never cleared — the root child decides authoritatively). A wrong
+        # "stale" guess costs one admin prompt at most. Note the unprivileged
+        # pre-check cannot validate elevated sessions (root-0700 staging is
+        # unreadable), so those keep blocking here and fall through to Unmount.
+        if existing is not None and not session_targets_gone(
+            existing, deps.hdiutil or "/usr/bin/hdiutil", canonical_path
+        ):
             raise RunnerError(
                 "A session is already active. Click Unmount before mounting again.\n"
                 f"NTFS mount: {existing.ntfs_mount}"
@@ -162,7 +170,7 @@ def _mount_in_process(
 ) -> MountSession:
     """In-process mount pipeline (root / already elevated / non-Darwin)."""
     req = _canonicalize_bek_secret(req)
-    volume = _validate_mount_request(req, deps, session_path=session_path)
+    volume = _validate_mount_request(req, deps, log, session_path=session_path)
     fuse_mount = _prepare_fuse_mount(req, elevated=elevated, session_path=session_path, uid=uid)
     ntfs_mount = _allocate_volume_path(req.volume_label)
     fuse_proc: subprocess.Popen[str] | None = None
@@ -357,6 +365,7 @@ def _canonicalize_bek_secret(req: MountRequest) -> MountRequest:
 def _validate_mount_request(
     req: MountRequest,
     deps: DepsStatus,
+    log: LogFn,
     *,
     session_path: Path | None = None,
 ) -> str:
@@ -378,12 +387,18 @@ def _validate_mount_request(
     elif not req.secret:
         raise RunnerError("Password / recovery password is empty")
 
-    existing = load_session(session_path)
+    require_owner: int | None = 0 if os.geteuid() == 0 else None
+    existing = load_session(session_path, require_owner=require_owner)
     if existing is not None:
-        raise RunnerError(
-            "A session is already active. Click Unmount before mounting again.\n"
-            f"NTFS mount: {existing.ntfs_mount}"
-        )
+        # Authoritative: a fully-stale session is cleared instead of blocking.
+        if session_targets_gone(existing, deps.hdiutil or "/usr/bin/hdiutil", session_path):
+            log(f"Stale session for {existing.ntfs_mount} found; clearing it automatically…")
+            clear_session(session_path)
+        else:
+            raise RunnerError(
+                "A session is already active. Click Unmount before mounting again.\n"
+                f"NTFS mount: {existing.ntfs_mount}"
+            )
     return volume
 
 

@@ -212,21 +212,14 @@ def test_detach_runs_on_match(tmp_path: Path) -> None:
 
 
 def test_detach_falls_back_to_force(tmp_path: Path) -> None:
-    """A failed primary detach retries with force after identity passes.
-
-    Pre-existing fallback semantics keep the primary error, so state is
-    still retained; the gate under test is that force runs at all.
-    """
+    """A failed primary detach retries with force; success clears state."""
     with _fuse_dir() as fuse:
         stored = _stored_session(tmp_path, _session(fuse_mount=str(fuse)))
         entry = _image_entry(str(fuse / "dislocker-file"), "/dev/disk9")
         run = _detach_responder(info_images=[entry], detach_rc=1, force_rc=0)
-        with (
-            patch("dislocker_ui.unmount_steps.subprocess.run", run),
-            pytest.raises(RunnerError, match="retained"),
-        ):
+        with patch("dislocker_ui.unmount_steps.subprocess.run", run):
             _unmount_session_file(stored, [])
-    assert stored.exists()
+    assert not stored.exists()
     assert _detach_calls(run) == [
         [_HDIUTIL, "detach", "/dev/disk9"],
         [_HDIUTIL, "detach", "-force", "/dev/disk9"],

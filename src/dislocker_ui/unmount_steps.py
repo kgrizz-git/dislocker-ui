@@ -34,6 +34,7 @@ from dislocker_ui.deps import DepsStatus
 from dislocker_ui.mount_policy import (
     is_privileged_fuse_path,
     remove_empty_privileged_staging_parents,
+    session_paths_error,
 )
 from dislocker_ui.session import MountSession
 
@@ -67,17 +68,20 @@ def _run_with_fallback(
     fallback: list[str],
     log: LogFn,
 ) -> list[str]:
-    """Try *primary*, then *fallback* on failure; return any error messages."""
-    errors: list[str] = []
+    """Try *primary*, then *fallback* on failure; return any error messages.
+
+    A fallback that succeeds clears the primary error (kept in the log);
+    only failures are returned.
+    """
     try:
         _run(primary, log, check=True)
     except RunnerError as exc:
-        errors.append(str(exc))
+        log(f"Primary command failed ({exc}); trying fallback…")
         try:
             _run(fallback, log, check=True)
         except RunnerError as exc2:
-            errors.append(str(exc2))
-    return errors
+            return [str(exc), str(exc2)]
+    return []
 
 
 def _mounted_paths() -> set[str] | None:
@@ -192,6 +196,35 @@ def _image_identity_ok(images: dict[str, str], raw_disk: str, session: MountSess
         return False
     expected = _expected_image_path(session.fuse_mount, session.dislocker_file)
     return _normalized_hdiutil_image_path(actual) == expected
+
+
+def session_targets_gone(
+    session: MountSession, hdiutil: str, session_path: Path | None = None
+) -> bool:
+    """Return whether every recorded target is verifiably gone.
+
+    All three checks must agree: the session passes path validation (the
+    root child supplies its canonical session path here), both mounts are
+    absent from a successfully read mount table, and the raw disk is not
+    attached as our image per a successfully read image list. Unknown
+    table/list state, or a session failing validation, is never stale.
+    """
+    if session_paths_error(session, session_path) is not None:
+        return False
+    if _is_mounted(session.ntfs_mount) or _is_mounted(session.fuse_mount):
+        return False
+    images = _attached_disk_images(hdiutil)
+    if images is None:
+        return False
+    return not _image_identity_ok(images, session.raw_disk, session)
+
+
+def session_looks_stale(session: MountSession, session_path: Path | None = None) -> bool:
+    """Advisory staleness hint for GUI status; never raises."""
+    try:
+        return session_targets_gone(session, "/usr/bin/hdiutil", session_path)
+    except Exception:
+        return False
 
 
 def _detach_raw_disk(deps: DepsStatus, session: MountSession, log: LogFn) -> list[str]:

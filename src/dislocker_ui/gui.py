@@ -34,6 +34,7 @@ from dislocker_ui.runner import (
     unmount_volume,
 )
 from dislocker_ui.session import active_session_path_for_user, load_session
+from dislocker_ui.unmount_steps import session_looks_stale
 
 __all__ = ["PWD_AUTO_HIDE_MS", "DislockerApp", "_raise_root_window", "run_app"]
 
@@ -282,10 +283,17 @@ class DislockerApp(ttk.Frame):
 
     def _refresh_session_status(self) -> None:
         """Show whether a session is currently recorded."""
-        session = load_session(active_session_path_for_user())
+        session_path = active_session_path_for_user()
+        session = load_session(session_path)
         if session:
             mode = "RO" if session.readonly else "RW"
-            self.status_var.set(f"Active session ({mode}): {session.ntfs_mount}")
+            status = f"Active session ({mode}): {session.ntfs_mount}"
+            try:
+                if session_looks_stale(session, session_path):
+                    status += " — looks stale; click Unmount to clean up"
+            except Exception:
+                pass
+            self.status_var.set(status)
         else:
             self.status_var.set("No active session")
 
