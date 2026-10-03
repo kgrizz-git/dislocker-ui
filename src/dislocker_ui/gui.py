@@ -291,8 +291,8 @@ class DislockerApp(ttk.Frame):
             try:
                 if session_looks_stale(session, session_path):
                     status += " — looks stale; click Unmount to clean up"
-            except Exception:
-                pass
+            except Exception as exc:
+                self.log(f"Stale-session check failed: {exc}")
             self.status_var.set(status)
         else:
             self.status_var.set("No active session")

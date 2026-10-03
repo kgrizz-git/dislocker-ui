@@ -132,14 +132,14 @@ def test_mounted_paths_returns_none_when_listing_fails() -> None:
 def test_is_mounted_matches_exact_and_aliased_paths() -> None:
     """Exact hits and /tmp vs /private/tmp aliases count as mounted."""
     table = {"/private/tmp/dislocker-ui-x"}
-    realpath = lambda p: "/private/tmp" if p == "/tmp" else p  # noqa: E731
+    realpath = lambda p: "/private/tmp" if p == "/tmp" else p  # noqa: E731  # nosec B108 - fixture path, never created
     with (
         patch("dislocker_ui.unmount_steps._mounted_paths", return_value=table),
         patch("os.path.realpath", side_effect=realpath),
     ):
         assert _is_mounted("/private/tmp/dislocker-ui-x")
-        assert _is_mounted("/tmp/dislocker-ui-x")
-        assert not _is_mounted("/tmp/dislocker-ui-other")
+        assert _is_mounted("/tmp/dislocker-ui-x")  # nosec B108 - fixture path, never created
+        assert not _is_mounted("/tmp/dislocker-ui-other")  # nosec B108 - fixture path, never created
 
 
 def test_is_mounted_assumes_mounted_when_table_unavailable() -> None:

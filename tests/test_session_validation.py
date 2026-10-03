@@ -190,7 +190,8 @@ def test_unmount_rejects_ntfs_mount_outside_volumes(tmp_path: Path) -> None:
     fuse = Path(tempfile.mkdtemp(prefix="dislocker-ui-"))
     try:
         stored = _stored_session(
-            tmp_path, _session(fuse_mount=str(fuse), ntfs_mount="/tmp/evil-mount")
+            tmp_path,
+            _session(fuse_mount=str(fuse), ntfs_mount="/tmp/evil-mount"),  # nosec B108 - fixture path, never created
         )
         with (
             _guarded_boundaries() as (run, rmtree, rmdir),

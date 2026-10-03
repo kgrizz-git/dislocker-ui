@@ -52,6 +52,7 @@ def _run(
 ) -> subprocess.CompletedProcess[str]:
     """Run a subprocess, log argv, optionally raise RunnerError on failure."""
     log(" ".join(cmd))
+    # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit -- argv list, no shell; executables come from trusted deps
     proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
     if proc.stdout.strip():
         log(proc.stdout.strip())
@@ -166,6 +167,7 @@ def _attached_disk_images(hdiutil: str) -> dict[str, str] | None:
     partition nodes alike). Returns None when the listing is unavailable.
     """
     try:
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit -- argv list, no shell; executables come from trusted deps
         proc = subprocess.run(
             [hdiutil, "info", "-plist"], check=False, capture_output=True, timeout=10
         )

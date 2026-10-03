@@ -130,7 +130,7 @@ def test_attached_disk_images_maps_every_entity() -> None:
     payload = {
         "images": [
             _image_entry("/Applications/Other.dmg", "/dev/disk5", "/dev/disk5s1"),
-            _image_entry("/tmp/Kiro%20CLI.dmg", "/dev/disk6"),
+            _image_entry("/tmp/Kiro%20CLI.dmg", "/dev/disk6"),  # nosec B108 - fixture path, never created
             {"image-path": 42, "system-entities": []},
             {"nope": True},
         ]
@@ -140,7 +140,7 @@ def test_attached_disk_images_maps_every_entity() -> None:
         assert _attached_disk_images(_HDIUTIL) == {
             "/dev/disk5": "/Applications/Other.dmg",
             "/dev/disk5s1": "/Applications/Other.dmg",
-            "/dev/disk6": "/tmp/Kiro CLI.dmg",
+            "/dev/disk6": "/tmp/Kiro CLI.dmg",  # nosec B108 - fixture path, never created
         }
 
 
@@ -169,12 +169,14 @@ def test_attached_disk_images_returns_none_on_failure() -> None:
 
 def test_image_identity_ok_matches_own_image_only() -> None:
     """Identity holds for the session image, nothing else."""
-    session = _session(fuse_mount="/tmp/dislocker-ui-x")
-    images = {"/dev/disk9": "/tmp/dislocker-ui-x/dislocker-file"}
+    session = _session(fuse_mount="/tmp/dislocker-ui-x")  # nosec B108 - fixture path, never created
+    images = {"/dev/disk9": "/tmp/dislocker-ui-x/dislocker-file"}  # nosec B108 - fixture path, never created
     assert _image_identity_ok(images, "/dev/disk9", session)
     assert not _image_identity_ok(images, "/dev/disk5", session)
     assert not _image_identity_ok(
-        {"/dev/disk9": "/tmp/other/dislocker-file"}, "/dev/disk9", session
+        {"/dev/disk9": "/tmp/other/dislocker-file"},  # nosec B108 - fixture path, never created
+        "/dev/disk9",
+        session,
     )
 
 
@@ -196,7 +198,7 @@ def test_detach_skips_different_image(tmp_path: Path) -> None:
     """A device attached as someone else's image is never detached."""
     with _fuse_dir() as fuse:
         stored = _stored_session(tmp_path, _session(fuse_mount=str(fuse)))
-        other = _image_entry(str(Path("/tmp") / "other-dislocker" / "dislocker-file"), "/dev/disk9")
+        other = _image_entry(str(Path("/tmp") / "other-dislocker" / "dislocker-file"), "/dev/disk9")  # nosec B108 - fixture path, never created
         run = _detach_responder(info_images=[other])
         with patch("dislocker_ui.unmount_steps.subprocess.run", run):
             _unmount_session_file(stored, [])
@@ -350,7 +352,7 @@ def test_best_effort_cleanup_skips_different_image(tmp_path: Path) -> None:
         marker = tmp_path / "active_session.json"
         marker.write_text("{}")
         logs: list[str] = []
-        other = _image_entry(str(Path("/tmp") / "other-dislocker" / "dislocker-file"), "/dev/disk9")
+        other = _image_entry(str(Path("/tmp") / "other-dislocker" / "dislocker-file"), "/dev/disk9")  # nosec B108 - fixture path, never created
         run = _detach_responder(info_images=[other])
         with patch("dislocker_ui.runner.subprocess.run", run):
             _best_effort_cleanup(
