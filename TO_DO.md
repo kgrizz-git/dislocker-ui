@@ -19,10 +19,14 @@ Open work only for **dislocker-ui**.
   (About / Usage / Troubleshooting) with text in a new `help_text.py`.
   Coordinate troubleshooting wording with the stale-session plan.
 - [Stale session unmount fixes](plans/2026-10-01-stale-session-unmount.md):
-  make unmount idempotent (stale sessions stop wedging Mount/Unmount
-  forever), verify raw-disk identity before `hdiutil detach` (never eject
-  a reassigned device), detect fully-stale sessions at mount time, and
-  add real step-level tests plus changelog/README updates. Target 0.5.3.
+  validate session paths for every session before cleanup (prerequisite:
+  idempotent unmount would otherwise reach root `rmtree` on unvalidated
+  paths), make unmount idempotent via the mount table (stale sessions
+  stop wedging Mount/Unmount forever), verify raw-disk identity before
+  `hdiutil detach` (never eject a reassigned device), detect fully-stale
+  sessions at mount time (authoritative in `_validate_mount_request`,
+  advisory in the unprivileged pre-check), split out `unmount_steps.py`,
+  and add real step-level tests plus changelog/README updates. Target 0.5.3.
 - [Privileged helper hardening](plans/2026-08-05-privileged-helper-hardening.md):
   remediate the security audit findings in the elevated mount/unmount workflow.
   - Follow-up (reviews 2026-09-15/16, deferred deliberately): the osascript

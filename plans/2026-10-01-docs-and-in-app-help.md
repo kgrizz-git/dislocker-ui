@@ -62,8 +62,10 @@ covering, in error-message-first order:
   (and the root-state variant under `/var/db/dislocker-ui/<uid>/` for
   elevated sessions). Note that 0.5.3+ self-heals (cross-reference
   `plans/2026-10-01-stale-session-unmount.md`). Mention that leftover
-  empty `/Volumes/DislockerUI*` dirs are harmless — 0.5.3+ removes them
-  on successful unmount.
+  empty `/Volumes/DislockerUI*` dirs are harmless. 0.5.3+ removes only
+  the directory recorded in the session on successful unmount. Other
+  leftovers (e.g. `DislockerUI-2` from the 2026-10-01 incident) stay
+  until removed by hand with `sudo rmdir`.
 - **"Missing required tools"** — one-line pointer to the install section
   and `scripts/install-root-deps.sh`.
 - **"NTFS volume requires ntfs-3g"** — FAT/ExFAT works without it.
@@ -80,8 +82,12 @@ per entry, no machine-specific home paths (use `$HOME`).
 ### D2: In-app Help menu
 
 - Add a native `tk.Menu` menubar to the root window in `gui.py._build()`
-  with a single **Help** menu (macOS moves it to the system menubar
-  automatically):
+  with a single **Help** menu. Create it as
+  `tk.Menu(menubar, name="help")`: on macOS Tk only merges a cascade
+  into the system Help menu when it carries that exact name. Optionally
+  put About in `tk.Menu(menubar, name="apple")` (the application menu)
+  on Darwin; elsewhere keep it under Help. Both forms work under Xvfb in
+  CI.
   - **About dislocker-ui** — `messagebox.showinfo` with version
     (reuse `__version__`, already imported in gui.py), one-line purpose,
     GPL-3.0-or-later, and repo URL.
@@ -106,9 +112,15 @@ per entry, no machine-specific home paths (use `$HOME`).
 Troubleshooting text must be written to be correct both before and after
 `plans/2026-10-01-stale-session-unmount.md` lands: "click Unmount (fixed
 in 0.5.3 to clean up stale sessions automatically); on older releases
-remove the session file manually". Coordinate the exact wording with that
-plan's README item so the two plans do not write the same section twice —
-whichever lands second reconciles the text.
+remove the session file manually".
+
+Ownership is fixed, not "whichever lands second": **this plan's
+Troubleshooting section owns** the stale-session recovery text (the
+self-healing wording and the manual `sudo rm`). The stale-session plan
+adds only a one-line pointer from "Safety notes" to Troubleshooting. If
+the stale-session plan lands first, it creates the Troubleshooting entry
+using the wording in D1 above, and this plan extends that section rather
+than rewriting it.
 
 ### D4: Changelog placement
 
@@ -127,14 +139,19 @@ whichever lands second reconciles the text.
       callbacks. No other behavioral changes.
 - [ ] `README.md` — Troubleshooting section (D1).
 - [ ] `VERSION` + `CHANGELOG.md` (and/or `CHANGELOG.dev.md` per D4).
-- [ ] Tests (`tests/test_gui.py`):
+- [ ] Tests in a **new** `tests/test_help_menu.py`. `tests/test_gui.py` is
+      already 691 lines (soft cap 600, hard cap 750), so do not grow it.
+      Reuse its Tk root fixture pattern (move it to `tests/conftest.py`
+      if both files need it):
       - Help menu exists and all three commands open without error
         (Tk root fixture pattern already in the file).
       - `help_text` constants: non-empty, contain the manual-recovery
         command, contain no absolute `/Users/…` paths (mirrors the
         absolute-path policy) and no secrets.
-      - Status label refreshes after a stale-session clear (no active
-        session → "No active session").
+      - The Help cascade is named `help` (macOS system-menu merge).
+      - (Moved) The stale-session status-label test belongs to the
+        stale-session plan (its D7). The post-operation refresh already
+        exists at gui.py:389 and gui.py:434.
 - [ ] Gates: `python3 -m compileall -q src`, ruff check + format,
       `pytest --cov` (≥80%), `python3 hooks/check_file_size.py`,
       `python3 hooks/check_absolute_paths.py`.
@@ -163,4 +180,9 @@ whichever lands second reconciles the text.
 - Absolute-path policy: `AGENTS.md` (no literal home paths),
   `hooks/check_absolute_paths.py`.
 - Cross-referenced plan: `plans/2026-10-01-stale-session-unmount.md`
-  (its README item owns the self-healing wording).
+  (this plan's Troubleshooting section owns the self-healing wording; that
+  plan adds a Safety-notes pointer only — see D3).
+- Plan review 2026-10-03: verified gui.py has no menu (471 lines),
+  README has no Troubleshooting section (286 lines), `__version__` is
+  imported at gui.py:25. Folded in: macOS menu naming, leftover-dir
+  wording, README ownership, status-label test moved.
