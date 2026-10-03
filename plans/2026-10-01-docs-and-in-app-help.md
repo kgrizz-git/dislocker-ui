@@ -61,7 +61,7 @@ covering, in error-message-first order:
   `sudo rm "$HOME/Library/Application Support/dislocker-ui/active_session.json"`
   (and the root-state variant under `/var/db/dislocker-ui/<uid>/` for
   elevated sessions). Note that 0.5.3+ self-heals (cross-reference
-  `plans/2026-10-01-stale-session-unmount.md`). Mention that leftover
+  `plans/archive/2026-10-03-stale-session-unmount.md`). Mention that leftover
   empty `/Volumes/DislockerUI*` dirs are harmless. 0.5.3+ removes only
   the directory recorded in the session on successful unmount. Other
   leftovers (e.g. `DislockerUI-2` from the 2026-10-01 incident) stay
@@ -110,9 +110,13 @@ per entry, no machine-specific home paths (use `$HOME`).
 ### D3: Consistency with the stale-session fix
 
 Troubleshooting text must be written to be correct both before and after
-`plans/2026-10-01-stale-session-unmount.md` lands: "click Unmount (fixed
+`plans/archive/2026-10-03-stale-session-unmount.md` lands: "click Unmount (fixed
 in 0.5.3 to clean up stale sessions automatically); on older releases
 remove the session file manually".
+
+Status 2026-10-03: the stale-session plan shipped in 0.5.3 and created a
+minimal README Troubleshooting section with the stale-session entry.
+This plan extends that section; it does not rewrite the entry.
 
 Ownership is fixed, not "whichever lands second": **this plan's
 Troubleshooting section owns** the stale-session recovery text (the
@@ -179,7 +183,7 @@ than rewriting it.
   pointer), log pane at `gui.py:156-162`.
 - Absolute-path policy: `AGENTS.md` (no literal home paths),
   `hooks/check_absolute_paths.py`.
-- Cross-referenced plan: `plans/2026-10-01-stale-session-unmount.md`
+- Cross-referenced plan: `plans/archive/2026-10-03-stale-session-unmount.md`
   (this plan's Troubleshooting section owns the self-healing wording; that
   plan adds a Safety-notes pointer only — see D3).
 - Plan review 2026-10-03: verified gui.py has no menu (471 lines),

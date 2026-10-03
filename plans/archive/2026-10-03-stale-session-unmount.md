@@ -1,7 +1,7 @@
 # Stale Session Unmount Fixes
 
 **Created:** 2026-10-01
-**Status:** Active
+**Status:** Implemented 2026-10-03 in 0.5.3 (commits 48a4b72..061bf27); manual reboot verification still pending (tracked in TO_DO.md)
 **Target Version:** 0.5.3 (bugfix)
 **Branch:** `fix/stale-session-unmount`
 
@@ -239,51 +239,51 @@ freeze — tracked as a stretch item.
 
 ### 0. Module split (D4)
 
-- [ ] Create `unmount_steps.py`; move `_unmount_ntfs`, `_detach_raw_disk`,
+- [x] Create `unmount_steps.py`; move `_unmount_ntfs`, `_detach_raw_disk`,
       `_unmount_fuse`, `_remove_fuse_dir`, `_remove_empty_ntfs_dir` there
       unchanged first (pure move, tests green), then add the new helpers.
-- [ ] Update the AGENTS.md architecture table.
+- [x] Update the AGENTS.md architecture table.
 
 ### 1. Session validation + idempotent unmount (D1, D1b, D6)
 
-- [ ] Add `_validate_session_paths(session, session_path)` (shared policy
+- [x] Add `_validate_session_paths(session, session_path)` (shared policy
       in `mount_policy.py`); call it at the top of `unmount_volume` for
       every session, before any step (D1b).
-- [ ] Add an opt-in owner check to `load_session` (reject a file not owned
+- [x] Add an opt-in owner check to `load_session` (reject a file not owned
       by the euid when running as root); use it on root unmount/mount
       paths only.
-- [ ] Add `_is_mounted(path: str) -> bool` parsing `/sbin/mount` output;
+- [x] Add `_is_mounted(path: str) -> bool` parsing `/sbin/mount` output;
       never `lstat` the target. `/sbin/mount` failure → "possibly
       mounted" (D1).
-- [ ] Guard `_unmount_ntfs` and `_unmount_fuse` with it (D1).
-- [ ] Downgrade "not empty" in `_remove_empty_ntfs_dir` to a warning when
+- [x] Guard `_unmount_ntfs` and `_unmount_fuse` with it (D1).
+- [x] Downgrade "not empty" in `_remove_empty_ntfs_dir` to a warning when
       the path is confirmed not mounted (D6).
-- [ ] `unmount_volume`: no signature change needed; with D1 the error list
+- [x] `unmount_volume`: no signature change needed; with D1 the error list
       is empty for stale sessions and `clear_session` runs normally.
 
 ### 2. Verified detach (D2, D2b)
 
-- [ ] Add `_attached_disk_images(hdiutil: str) -> dict[str, str]` parsing
+- [x] Add `_attached_disk_images(hdiutil: str) -> dict[str, str]` parsing
       `hdiutil info -plist` into `{dev-entry: image-path}` for every
       system entity (stdlib plistlib, matching `disks.py` style).
-- [ ] Rewrite `_detach_raw_disk`: identity check (D2) before both the
+- [x] Rewrite `_detach_raw_disk`: identity check (D2) before both the
       primary and force attempts; log-and-skip on mismatch/absence.
-- [ ] Normalize before comparing: `unquote()` the hdiutil side only;
+- [x] Normalize before comparing: `unquote()` the hdiutil side only;
       resolve `Path(session.fuse_mount).parent` and re-append
       `<fuse dir>/dislocker-file` (never resolve inside the FUSE mount).
-- [ ] Apply the same identity gate to `_best_effort_cleanup` (D2b) with the
+- [x] Apply the same identity gate to `_best_effort_cleanup` (D2b) with the
       fixed `/usr/bin/hdiutil` path; log loudly when it skips.
 
 ### 3. Staleness detection (D3, D7)
 
-- [ ] Add `_session_targets_gone(session) -> bool` using the helpers above
+- [x] Add `_session_targets_gone(session) -> bool` using the helpers above
       (D3). Sessions failing D1b are never stale.
-- [ ] `_validate_mount_request` (authoritative): stale → log, clear,
+- [x] `_validate_mount_request` (authoritative): stale → log, clear,
       proceed; live → raise as today.
-- [ ] `mount_volume` pre-check (advisory, unprivileged): looks stale → do
+- [x] `mount_volume` pre-check (advisory, unprivileged): looks stale → do
       not raise and do not clear; proceed to elevation. Looks live → raise
       as today.
-- [ ] GUI status label appends a "looks stale" hint (D7), via a non-GUI
+- [x] GUI status label appends a "looks stale" hint (D7), via a non-GUI
       helper.
 
 ### 4. Tests (new file `tests/test_unmount_stale.py`)
@@ -291,50 +291,50 @@ freeze — tracked as a stretch item.
 Exercise the **real** step functions (patch at the `subprocess`/`_run`
 boundary, not by mocking the steps themselves):
 
-- [ ] Stale session unmount: no target exists → `unmount_volume` returns
+- [x] Stale session unmount: no target exists → `unmount_volume` returns
       cleanly, session file is deleted, no subprocess detach/umount of
       unrelated devices.
-- [ ] Live mount unmount still retains state on failure (busy volume
+- [x] Live mount unmount still retains state on failure (busy volume
       simulated via `_run` raising) — preserves retry semantics.
-- [ ] Detach identity gate: `hdiutil info` shows the device as a physical
+- [x] Detach identity gate: `hdiutil info` shows the device as a physical
       disk / different image → detach skipped, no error.
-- [ ] Detach identity gate: image-path matches → detach runs (primary,
+- [x] Detach identity gate: image-path matches → detach runs (primary,
       then force-fallback path).
-- [ ] Path normalization: `/tmp/...` vs `/private/tmp/...` image-path
+- [x] Path normalization: `/tmp/...` vs `/private/tmp/...` image-path
       match.
-- [ ] URL-decoding: percent-encoded image-path (`Kiro%20CLI.dmg`) matches
+- [x] URL-decoding: percent-encoded image-path (`Kiro%20CLI.dmg`) matches
       a session path with a literal space; a literal `%` in the session
       path is not decoded.
-- [ ] Partition node: session `raw_disk` `/dev/diskNsM` is found in the map.
-- [ ] `_best_effort_cleanup` identity gate: absent/mismatched raw_disk →
+- [x] Partition node: session `raw_disk` `/dev/diskNsM` is found in the map.
+- [x] `_best_effort_cleanup` identity gate: absent/mismatched raw_disk →
       no detach subprocess and a warning is logged; matching image →
       force-detach runs.
-- [ ] Crafted non-elevated session (D1b): `fuse_mount` outside
+- [x] Crafted non-elevated session (D1b): `fuse_mount` outside
       `tempfile.gettempdir()`, `ntfs_mount` outside `/Volumes`, or a bad
       `raw_disk` → `RunnerError`, no `rmtree`/`rmdir`/umount/detach, session
       retained.
-- [ ] Session file not owned by the euid (root path) → rejected.
-- [ ] Dead FUSE mount (D1): path listed in `/sbin/mount` output while
+- [x] Session file not owned by the euid (root path) → rejected.
+- [x] Dead FUSE mount (D1): path listed in `/sbin/mount` output while
       `os.lstat` raises ENXIO → umount is still attempted, not skipped.
-- [ ] `/sbin/mount` failure → targets treated as possibly mounted.
-- [ ] Stale `/Volumes` dir not empty and not mounted → warning, session
+- [x] `/sbin/mount` failure → targets treated as possibly mounted.
+- [x] Stale `/Volumes` dir not empty and not mounted → warning, session
       cleared (D6).
-- [ ] Mount with stale session proceeds and clears the session file
+- [x] Mount with stale session proceeds and clears the session file
       (`_validate_mount_request`, sudo path, `needs_elevation()` False).
-- [ ] Mount with live session still blocks.
-- [ ] Elevated pre-check (`needs_elevation()` True) with a stale-looking
+- [x] Mount with live session still blocks.
+- [x] Elevated pre-check (`needs_elevation()` True) with a stale-looking
       session: no `clear_session` call, no raise, elevation proceeds.
       Live-looking session still raises before the prompt.
-- [ ] Root child, mount: `_validate_mount_request` with the root
+- [x] Root child, mount: `_validate_mount_request` with the root
       `session_path` clears a stale session and proceeds.
-- [ ] Root child, unmount: drive `privileged.main()` → **real**
+- [x] Root child, unmount: drive `privileged.main()` → **real**
       `unmount_volume` (patch `needs_elevation` False and `subprocess.run`),
       not a mocked `unmount_volume` like
       `test_main_unmount_uses_canonical_session`.
-- [ ] GUI startup with a stale session shows the "looks stale" hint (D7).
+- [x] GUI startup with a stale session shows the "looks stale" hint (D7).
       Put it in a new test file, not `tests/test_gui.py` (691 lines,
       near the 750 hard cap).
-- [ ] Note: when `needs_elevation()` is true, `unmount_volume` loads
+- [x] Note: when `needs_elevation()` is true, `unmount_volume` loads
       `session_path or active_session_path_for_user()` (runner.py:264-266),
       but `run_elevated_unmount` passes no path, so the **root child**
       always uses its canonical `root_session_path(uid)`. Elevated-path
@@ -342,11 +342,11 @@ boundary, not by mocking the steps themselves):
 
 ### 5. Docs
 
-- [ ] `VERSION` → `0.5.3`, `CHANGELOG.md` under `Fixed`:
+- [x] `VERSION` → `0.5.3`, `CHANGELOG.md` under `Fixed`:
       unmount is idempotent for stale sessions; raw-disk detach now
       verifies identity (never ejects a reassigned device); stale sessions
       no longer block mounting.
-- [ ] README: this plan does **not** own the stale-session recovery text.
+- [x] README: this plan does **not** own the stale-session recovery text.
       The Troubleshooting section from
       `plans/2026-10-01-docs-and-in-app-help.md` owns the self-healing
       wording and the manual `sudo rm` command. This plan adds only a
@@ -354,16 +354,16 @@ boundary, not by mocking the steps themselves):
       already active after a reboot, see Troubleshooting"). If this plan
       lands first, add that Troubleshooting entry here using the docs
       plan's wording.
-- [ ] AGENTS.md architecture table: add `unmount_steps.py`.
-- [ ] `CHANGELOG.dev.md`: test-approach note (tests now exercise the real
+- [x] AGENTS.md architecture table: add `unmount_steps.py`.
+- [x] `CHANGELOG.dev.md`: test-approach note (tests now exercise the real
       step functions at the subprocess boundary) if it warrants an entry.
 
 ### 6. Verification
 
-- [ ] `python3 -m compileall -q src`
-- [ ] `ruff check src tests hooks` + `ruff format --check src tests hooks`
-- [ ] `pytest --cov --cov-report=term-missing` (≥80%, no C901)
-- [ ] `python3 hooks/check_file_size.py` (runner.py stays <750)
+- [x] `python3 -m compileall -q src`
+- [x] `ruff check src tests hooks` + `ruff format --check src tests hooks`
+- [x] `pytest --cov --cov-report=term-missing` (≥80%, no C901)
+- [x] `python3 hooks/check_file_size.py` (runner.py stays <750)
 - [ ] Manual: mount a BitLocker volume, reboot, launch, confirm Mount
       self-heals (or Unmount clears) without the wedge; confirm no eject
       of unrelated disks (verify via `diskutil list` before/after).

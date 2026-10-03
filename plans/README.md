@@ -27,9 +27,6 @@ Tracked implementation plans for **dislocker-ui**.
 
 ## Active plans
 
-- [Stale session unmount fixes](2026-10-01-stale-session-unmount.md):
-  idempotent unmount, verified raw-disk detach, mount-time staleness
-  detection, tests and docs.
 - [Documentation and in-app help](2026-10-01-docs-and-in-app-help.md):
   README troubleshooting section plus a minimal in-app Help menu.
 - [Privileged helper hardening](2026-08-05-privileged-helper-hardening.md):
