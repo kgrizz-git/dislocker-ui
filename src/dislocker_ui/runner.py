@@ -60,7 +60,10 @@ from dislocker_ui.session import (
 )
 from dislocker_ui.unmount_steps import (
     RunnerError,
+    _attached_disk_images,
     _detach_raw_disk,
+    _expected_image_path,
+    _normalized_hdiutil_image_path,
     _remove_empty_ntfs_dir,
     _remove_fuse_dir,
     _unmount_fuse,
@@ -537,11 +540,17 @@ def _best_effort_cleanup(
     if ntfs_mount.exists():
         subprocess.run(["/sbin/umount", str(ntfs_mount)], check=False, capture_output=True)
     if raw_disk:
-        subprocess.run(
-            ["/usr/bin/hdiutil", "detach", "-force", raw_disk],
-            check=False,
-            capture_output=True,
-        )
+        images = _attached_disk_images("/usr/bin/hdiutil")
+        expected = _expected_image_path(str(fuse_mount), "dislocker-file")
+        actual = images.get(raw_disk) if images is not None else None
+        if actual is not None and _normalized_hdiutil_image_path(actual) == expected:
+            subprocess.run(
+                ["/usr/bin/hdiutil", "detach", "-force", raw_disk],
+                check=False,
+                capture_output=True,
+            )
+        else:
+            log(f"raw disk {raw_disk} not verified as our image; left attached — detach manually")
     if fuse_mount.exists():
         subprocess.run(["/sbin/umount", str(fuse_mount)], check=False, capture_output=True)
         shutil.rmtree(fuse_mount, ignore_errors=True)

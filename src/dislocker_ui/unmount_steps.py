@@ -23,10 +23,12 @@ Requirements:
 from __future__ import annotations
 
 import os
+import plistlib
 import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import unquote
 
 from dislocker_ui.deps import DepsStatus
 from dislocker_ui.mount_policy import (
@@ -133,8 +135,77 @@ def _unmount_ntfs(deps: DepsStatus, session: MountSession, log: LogFn) -> list[s
     )
 
 
+def _attached_disk_images(hdiutil: str) -> dict[str, str] | None:
+    """Map every attached disk-image device to its decoded image path.
+
+    Covers each ``images[].system-entities[].dev-entry`` (whole disks and
+    partition nodes alike). Returns None when the listing is unavailable.
+    """
+    try:
+        proc = subprocess.run([hdiutil, "info", "-plist"], check=False, capture_output=True)
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        info = plistlib.loads(proc.stdout)
+    except Exception:
+        return None
+    if not isinstance(info, dict) or not isinstance(info.get("images"), list):
+        return None
+    found: dict[str, str] = {}
+    for image in info["images"]:
+        if not isinstance(image, dict) or not isinstance(image.get("image-path"), str):
+            continue
+        # Percent-decoding applies to the hdiutil side only; session paths
+        # are compared literally so a real "%" is never mis-decoded.
+        decoded = unquote(image["image-path"])
+        entities = image.get("system-entities")
+        if not isinstance(entities, list):
+            continue
+        for entity in entities:
+            if isinstance(entity, dict) and isinstance(entity.get("dev-entry"), str):
+                found[entity["dev-entry"]] = decoded
+    return found
+
+
+def _expected_image_path(fuse_mount: str, dislocker_file: str) -> str:
+    """Expected on-disk image path, without statting inside the FUSE mount.
+
+    Resolves only the temp dir itself, then re-appends the last two name
+    parts (``<fuse dir>/<image file>``).
+    """
+    fuse = Path(fuse_mount)
+    return os.path.join(os.path.realpath(fuse.parent), fuse.name, Path(dislocker_file).name)
+
+
+def _normalized_hdiutil_image_path(image_path: str) -> str:
+    """Normalize an hdiutil image path the same way, via its grandparent."""
+    path = Path(image_path)
+    return os.path.join(os.path.realpath(path.parent.parent), path.parent.name, path.name)
+
+
+def _image_identity_ok(images: dict[str, str], raw_disk: str, session: MountSession) -> bool:
+    """Return whether *raw_disk* is attached as this session's own image."""
+    actual = images.get(raw_disk)
+    if actual is None:
+        return False
+    expected = _expected_image_path(session.fuse_mount, session.dislocker_file)
+    return _normalized_hdiutil_image_path(actual) == expected
+
+
 def _detach_raw_disk(deps: DepsStatus, session: MountSession, log: LogFn) -> list[str]:
-    """Detach the hdiutil raw disk, forcing if needed."""
+    """Detach the hdiutil raw disk, but only after verifying its identity.
+
+    A device number recorded before a reboot may now belong to an unrelated
+    disk; detaching it blind would eject someone else's drive.
+    """
+    images = _attached_disk_images(deps.hdiutil or "/usr/bin/hdiutil")
+    if images is None:
+        return [f"Could not verify {session.raw_disk} is still our disk image; not detaching"]
+    if not _image_identity_ok(images, session.raw_disk, session):
+        log(f"raw disk {session.raw_disk} no longer attached as our image; skipping detach")
+        return []
     log(f"Detaching {session.raw_disk}…")
     return _run_with_fallback(
         [deps.hdiutil, "detach", session.raw_disk],

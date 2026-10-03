@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import plistlib
 import shutil
 import tempfile
 from collections.abc import Iterator
@@ -145,7 +146,9 @@ def test_unmount_valid_session_passes_validation(tmp_path: Path) -> None:
     stored = _stored_session(tmp_path, _session(fuse_mount=str(fuse)))
     logs: list[str] = []
     with _guarded_boundaries() as (run, rmtree, rmdir):
-        run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        ok = MagicMock(returncode=0, stdout="", stderr="")
+        info = MagicMock(returncode=0, stdout=plistlib.dumps({"images": []}), stderr=b"")
+        run.side_effect = lambda cmd, **kwargs: info if cmd[1:3] == ["info", "-plist"] else ok
         _unmount_session_file(stored, logs)
     assert not stored.exists()
     assert run.called

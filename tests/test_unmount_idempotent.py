@@ -15,6 +15,7 @@ from __future__ import annotations
 import contextlib
 import errno
 import os
+import plistlib
 import shutil
 import tempfile
 from collections.abc import Iterator
@@ -87,13 +88,16 @@ def _unmount_session_file(session_path: Path, logs: list[str]) -> None:
 def _mount_responder(
     *, table: str = "", mount_rc: int = 0, other_rc: int = 0, other_err: str = ""
 ) -> MagicMock:
-    """Serve a fake /sbin/mount table; all other commands get *other_rc*."""
+    """Serve a fake /sbin/mount table and an empty hdiutil image list."""
     mount_result = MagicMock(returncode=mount_rc, stdout=table, stderr="")
+    info_result = MagicMock(returncode=0, stdout=plistlib.dumps({"images": []}), stderr=b"")
     other_result = MagicMock(returncode=other_rc, stdout="", stderr=other_err)
 
     def _fake(cmd: list[str], **kwargs: object) -> MagicMock:
         if cmd[:1] == ["/sbin/mount"]:
             return mount_result
+        if cmd[1:3] == ["info", "-plist"]:
+            return info_result
         return other_result
 
     return MagicMock(side_effect=_fake)
