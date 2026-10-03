@@ -25,7 +25,7 @@ import pytest
 from dislocker_ui.deps import DepsStatus
 from dislocker_ui.mount_policy import session_paths_error
 from dislocker_ui.runner import RunnerError, unmount_volume
-from dislocker_ui.session import MountSession, load_session, save_session
+from dislocker_ui.session import MountSession, load_session, save_session, session_owner_mismatch
 
 
 def _deps() -> DepsStatus:
@@ -183,14 +183,23 @@ def test_load_session_rejects_foreign_owner(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="needs a non-root file owner")
 def test_unmount_as_root_rejects_foreign_owned_session(tmp_path: Path) -> None:
-    """Running as root, a session file owned by someone else is ignored."""
+    """Running as root, a session file owned by someone else is distrusted."""
     stored = _stored_session(tmp_path, _session(fuse_mount="x"))
     assert os.lstat(stored).st_uid != 0
     with (
         patch("os.geteuid", return_value=0),
         patch("dislocker_ui.elevate.needs_elevation", return_value=False),
         patch("dislocker_ui.runner.legacy_session_present", return_value=False),
-        pytest.raises(RunnerError, match="No active session"),
+        pytest.raises(RunnerError, match="not owned by root"),
     ):
         unmount_volume(_deps(), lambda _m: None, session_path=stored)
     assert stored.exists()
+
+
+def test_session_owner_mismatch_reports_foreign_files(tmp_path: Path) -> None:
+    """The helper flags existing foreign-owned files, nothing else."""
+    stored = _stored_session(tmp_path, _session(fuse_mount="x"))
+    owner = os.lstat(stored).st_uid
+    assert session_owner_mismatch(stored, owner) is False
+    assert session_owner_mismatch(stored, owner + 1) is True
+    assert session_owner_mismatch(tmp_path / "missing.json", owner + 1) is False

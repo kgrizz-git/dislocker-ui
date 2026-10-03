@@ -180,6 +180,15 @@ def load_session(
         return None
 
 
+def session_owner_mismatch(path: Path | None = None, uid: int = 0) -> bool:
+    """True when a session file exists but is not owned by *uid*."""
+    target = path or default_session_path()
+    try:
+        return os.lstat(target).st_uid != uid
+    except OSError:
+        return False
+
+
 def legacy_session_present(path: Path | None = None) -> bool:
     """True when a regular session file appears to predate schema versioning."""
     target = path or default_session_path()

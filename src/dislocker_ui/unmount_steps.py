@@ -11,9 +11,10 @@ Inputs:
   DepsStatus, MountSession, log fn.
 
 Outputs:
-  Per-step lists of error strings (empty means the step succeeded);
-  side-effect umount/detach/rmdir calls. Raised RunnerError on
-  subprocess failure when check is requested.
+  Per-step lists of error strings (empty means the step succeeded or the
+  target was already in the desired end state); side-effect umount/detach
+  /rmdir calls. Raised RunnerError on subprocess failure when check is
+  requested.
 
 Requirements:
   umount, hdiutil, diskutil paths from DepsStatus; standard library only.
@@ -21,6 +22,7 @@ Requirements:
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -76,8 +78,53 @@ def _run_with_fallback(
     return errors
 
 
+def _mounted_paths() -> set[str] | None:
+    """Parse ``/sbin/mount`` output into mounted paths; None when unavailable."""
+    try:
+        proc = subprocess.run(["/sbin/mount"], check=False, capture_output=True, text=True)
+    except OSError:
+        return None
+    if proc.returncode != 0:
+        return None
+    paths: set[str] = set()
+    for line in proc.stdout.splitlines():
+        # "<dev> on <path> (<fstype>, ...)"; our paths are app-generated, so
+        # splitting on these separators is safe.
+        _, on_sep, rest = line.partition(" on ")
+        if not on_sep:
+            continue
+        pieces = rest.rsplit(" (", 1)
+        if len(pieces) != 2 or not pieces[0]:
+            continue
+        paths.add(pieces[0])
+    return paths
+
+
+def _is_mounted(path: str) -> bool:
+    """Return whether *path* appears in the mount table.
+
+    The mount table (not stat) is the source of truth: a dead FUSE mount
+    answers stat with ENXIO/EIO, so stat-based checks would misreport it as
+    unmounted, and a wedged daemon could hang the stat outright. When the
+    table itself is unavailable, assume the target is mounted.
+    """
+    mounted = _mounted_paths()
+    if mounted is None:
+        return True
+    if path in mounted:
+        return True
+    # Tolerate /tmp vs /private/tmp style aliases by resolving the parent
+    # only; the target itself is never statted.
+    parent = os.path.dirname(path)
+    aliased = os.path.join(os.path.realpath(parent), os.path.basename(path))
+    return aliased in mounted
+
+
 def _unmount_ntfs(deps: DepsStatus, session: MountSession, log: LogFn) -> list[str]:
     """Unmount the decrypted volume mountpoint, forcing via diskutil if needed."""
+    if not _is_mounted(session.ntfs_mount):
+        log(f"already unmounted: {session.ntfs_mount}")
+        return []
     log(f"Unmounting volume at {session.ntfs_mount}…")
     return _run_with_fallback(
         [deps.umount, session.ntfs_mount],
@@ -98,6 +145,9 @@ def _detach_raw_disk(deps: DepsStatus, session: MountSession, log: LogFn) -> lis
 
 def _unmount_fuse(deps: DepsStatus, session: MountSession, log: LogFn) -> list[str]:
     """Unmount the dislocker FUSE mount point."""
+    if not _is_mounted(session.fuse_mount):
+        log(f"already unmounted: {session.fuse_mount}")
+        return []
     log(f"Unmounting FUSE at {session.fuse_mount}…")
     try:
         _run([deps.umount, session.fuse_mount], log, check=True)
@@ -123,14 +173,22 @@ def _remove_fuse_dir(
     return []
 
 
-def _remove_empty_ntfs_dir(ntfs_mount: str) -> list[str]:
-    """Remove an empty /Volumes mount-point directory left after unmount."""
+def _remove_empty_ntfs_dir(ntfs_mount: str, log: LogFn) -> list[str]:
+    """Remove an empty /Volumes mount-point directory left after unmount.
+
+    A non-empty directory that is confirmed unmounted is left in place with
+    a warning (stale contents need operator inspection); only a directory
+    that is still mounted retains the session for retry.
+    """
     ntfs_path = Path(ntfs_mount)
     if not ntfs_path.is_dir():
         return []
     try:
         if not any(ntfs_path.iterdir()):
             ntfs_path.rmdir()
+        elif not _is_mounted(ntfs_mount):
+            log(f"Warning: leaving non-empty unmounted directory {ntfs_path} for inspection")
+            return []
         elif ntfs_path.exists():
             return [f"NTFS mountpoint is not empty: {ntfs_path}"]
     except OSError as exc:

@@ -56,6 +56,7 @@ from dislocker_ui.session import (
     legacy_session_present,
     load_session,
     save_session,
+    session_owner_mismatch,
 )
 from dislocker_ui.unmount_steps import (
     RunnerError,
@@ -274,6 +275,11 @@ def unmount_volume(
     require_owner: int | None = 0 if os.geteuid() == 0 else None
     session = load_session(canonical_path, require_owner=require_owner)
     if session is None:
+        if require_owner is not None and session_owner_mismatch(canonical_path, require_owner):
+            raise RunnerError(
+                "Session file is not owned by root and cannot be trusted. "
+                + _manual_session_cleanup_hint(canonical_path)
+            )
         # Probe the old user-owned path, never the trusted canonical state path.
         if legacy_session_present():
             raise RunnerError(_legacy_session_recovery_message())
@@ -297,7 +303,7 @@ def unmount_volume(
                 session.fuse_mount, elevated=session.elevated, session_path=canonical_path
             )
         )
-        errors.extend(_remove_empty_ntfs_dir(session.ntfs_mount))
+        errors.extend(_remove_empty_ntfs_dir(session.ntfs_mount, log))
     if not errors:
         clear_session(canonical_path)
     if errors:
