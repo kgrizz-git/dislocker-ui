@@ -60,8 +60,8 @@ def _run(
 ) -> subprocess.CompletedProcess[str]:
     """Run a subprocess, log argv, optionally raise RunnerError on failure."""
     log(" ".join(cmd))
-    # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit -- argv list, no shell; executables come from trusted deps
     try:
+        # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit -- argv list, no shell; executables come from trusted deps
         proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired:
         raise RunnerError(f"Command timed out after 120 seconds: {cmd[0]}") from None

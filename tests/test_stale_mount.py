@@ -234,12 +234,11 @@ def test_validate_mount_request_blocks_renumbered_image(tmp_path: Path) -> None:
             "system-entities": [{"dev-entry": "/dev/disk7"}],
         }
         run = _stale_responder(info_images=[entry])
-        with (
-            _volume(tmp_path) as volume,
-            patch("dislocker_ui.unmount_steps.subprocess.run", run),
-            pytest.raises(RunnerError, match="already active"),
-        ):
-            _validate_mount_request(_req(volume), _deps(), lambda _m: None, session_path=stored)
+        deps = _deps()
+        with _volume(tmp_path) as volume, patch("dislocker_ui.unmount_steps.subprocess.run", run):
+            req = _req(volume)
+            with pytest.raises(RunnerError, match="already active"):
+                _validate_mount_request(req, deps, _ignore_log, session_path=stored)
         assert stored.exists()
     finally:
         shutil.rmtree(fuse, ignore_errors=True)
@@ -249,12 +248,11 @@ def test_validate_mount_request_blocks_renumbered_image(tmp_path: Path) -> None:
 def test_validate_mount_request_rejects_foreign_owned_file(tmp_path: Path) -> None:
     """Root never mounts over a session file owned by someone else."""
     stored = _stored_session(tmp_path, _stale_session())
-    with (
-        _volume(tmp_path) as volume,
-        patch("os.geteuid", return_value=0),
-        pytest.raises(RunnerError, match="not owned by root") as excinfo,
-    ):
-        _validate_mount_request(_req(volume), _deps(), lambda _m: None, session_path=stored)
+    deps = _deps()
+    with _volume(tmp_path) as volume, patch("os.geteuid", return_value=0):
+        req = _req(volume)
+        with pytest.raises(RunnerError, match="not owned by root") as excinfo:
+            _validate_mount_request(req, deps, _ignore_log, session_path=stored)
     assert "left untouched" in str(excinfo.value)
     assert stored.exists()
 
