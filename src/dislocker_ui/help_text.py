@@ -43,7 +43,8 @@ TROUBLESHOOTING_TEXT = """Troubleshooting
 "A session is already active" after a reboot, or Unmount
 never finishes: click Unmount (0.5.3+ cleans up stale
 sessions itself). On older releases, first confirm nothing
-is still mounted or attached (mount; hdiutil info), then:
+is still mounted or attached (mount | grep -E
+'DislockerUI|dislocker-ui'; hdiutil info), then:
 sudo rm "/var/root/Library/Application Support/dislocker-ui/active_session.json"
 ($HOME instead of /var/root if your sudo preserves it;
 sudo rm /var/db/dislocker-ui/<uid>/active_session.json

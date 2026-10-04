@@ -210,7 +210,7 @@ real mounts.
 
 ## Troubleshooting
 
-The same list is also available in the app under Help → Troubleshooting.
+A condensed version of this list is in the app under Help → Troubleshooting.
 
 - **"A session is already active" after a reboot, or Unmount never finishes:**
   click **Unmount** — 0.5.3+ detects the stale session and cleans it up.

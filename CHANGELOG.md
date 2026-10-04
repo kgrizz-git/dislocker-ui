@@ -16,6 +16,11 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 - Expanded README Troubleshooting section covering missing tools,
   ntfs-3g, macFUSE approval, post-`brew upgrade` breakage, and TCC.
 
+### Changed
+
+- Administrator-prompt elevation now refuses when the source scan cannot
+  inspect part of `src/` (unreadable or broken entries), with a fix hint.
+
 ## [0.5.3] - 2026-10-03
 
 ### Fixed

@@ -74,6 +74,7 @@ def test_about_dialog_shows_version(tk_root: tk.Tk) -> None:
     showinfo.assert_called_once()
     assert showinfo.call_args.args[0] == "About dislocker-ui"
     assert __version__ in showinfo.call_args.args[1]
+    assert showinfo.call_args.kwargs["parent"] is tk_root
 
 
 @pytest.mark.parametrize(
@@ -109,3 +110,25 @@ def test_help_dialog_reopening_lifts_existing(tk_root: tk.Tk) -> None:
         cascade.invoke(1)
     lift.assert_called_once_with()
     assert len([w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)]) == 1
+
+
+def _close_buttons(dialog: tk.Toplevel) -> list[ttk.Button]:
+    """Return the dialog's Close buttons."""
+    return [
+        w
+        for w in dialog.winfo_children()
+        if isinstance(w, ttk.Button) and w.cget("text") == "Close"
+    ]
+
+
+def test_help_dialog_recreates_after_close(tk_root: tk.Tk) -> None:
+    """Close destroys the dialog; reopening creates a fresh Toplevel."""
+    app = _build_app(tk_root)
+    cascade = _help_menu(app)
+    cascade.invoke(1)
+    (first,) = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)]
+    _close_buttons(first)[0].invoke()
+    assert not first.winfo_exists()
+    cascade.invoke(1)
+    rest = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)]
+    assert len(rest) == 1 and rest[0] is not first and rest[0].winfo_exists()

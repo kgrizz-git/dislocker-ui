@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 from pathlib import Path
 from unittest.mock import patch
 
@@ -65,6 +66,37 @@ def test_scan_rejects_unstatable_non_module_entry(tmp_path: Path) -> None:
 def test_scan_accepts_plain_non_module_files(tmp_path: Path) -> None:
     """Ordinary non-module files do not block elevation."""
     _assert_no_writable_py_files(_tree(tmp_path))
+
+
+def test_scan_skips_vanished_non_symlink_module(tmp_path: Path) -> None:
+    """A regular .py deleted mid-scan cannot hide a module; it is skipped."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    mod = pkg / "mod.py"
+    mod.write_text("", encoding="utf-8")
+    real_stat = os.stat
+
+    def _stat(path: object, *args: object, **kwargs: object) -> os.stat_result:
+        if str(path) == str(mod):
+            raise FileNotFoundError(2, "No such file or directory", str(mod))
+        return real_stat(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    with patch("os.stat", side_effect=_stat):
+        _assert_no_writable_py_files(pkg)
+
+
+def test_scan_hints_quote_paths_with_spaces(tmp_path: Path) -> None:
+    """Ownership hints shell-quote paths so they stay copy-pasteable."""
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    pkg = tmp_path / "dir with space" / "pkg"
+    pkg.mkdir(parents=True)
+    bad = pkg / "mod.py"
+    bad.write_text("", encoding="utf-8")
+    bad.chmod(0o664)
+    with pytest.raises(RunnerError, match="writable") as excinfo:
+        _assert_no_writable_py_files(pkg)
+    assert shlex.quote(str(bad)) in str(excinfo.value)
 
 
 def test_assert_no_writable_py_files_ok(tmp_path: Path) -> None:

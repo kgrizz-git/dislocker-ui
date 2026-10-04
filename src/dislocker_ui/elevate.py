@@ -306,7 +306,7 @@ def _scan_blocked_error(path: object, detail: object) -> RunnerError:
     Dangling entries (ENOENT, e.g. broken symlinks) cannot be fixed by
     re-owning them, so the message says to remove the entry instead.
     """
-    location = path if path is not None else "<unknown>"
+    location = shlex.quote(str(path)) if path is not None else "<unknown>"
     if isinstance(detail, OSError) and detail.errno == errno.ENOENT:
         return RunnerError(
             f"Refusing to elevate: cannot inspect {location} ({detail}). "
@@ -314,8 +314,16 @@ def _scan_blocked_error(path: object, detail: object) -> RunnerError:
         )
     return RunnerError(
         f"Refusing to elevate: cannot inspect {location} ({detail}). "
-        f'Fix ownership with: sudo chown "$USER" {location}'
+        f'Check permissions and ownership, e.g. sudo chown "$USER" {location}'
     )
+
+
+def _entry_is_dangling_symlink(entry: Path) -> bool:
+    """Return whether *entry* is a symlink whose target cannot be statted."""
+    try:
+        return stat.S_ISLNK(os.lstat(entry).st_mode)
+    except OSError:
+        return False
 
 
 def _check_dir_writable(dirpath: Path, src_root: Path) -> None:
@@ -332,7 +340,7 @@ def _check_dir_writable(dirpath: Path, src_root: Path) -> None:
     if mode & 0o022:
         raise RunnerError(
             f"Refusing to elevate: directory {dirpath} is group/world-writable "
-            f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {dirpath}"
+            f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {shlex.quote(str(dirpath))}"
         )
 
 
@@ -352,11 +360,15 @@ def _check_files_writable(dirpath: Path, filenames: list[str]) -> None:
         try:
             mode = entry.stat().st_mode
         except OSError as exc:
+            # A non-symlink that vanished mid-scan (e.g. a purged cache)
+            # cannot hide a module; only dangling symlinks refuse.
+            if exc.errno == errno.ENOENT and not _entry_is_dangling_symlink(entry):
+                continue
             raise _scan_blocked_error(entry, exc) from exc
         if mode & 0o022:
             raise RunnerError(
                 f"Refusing to elevate: {entry} is group/world-writable "
-                f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {entry}"
+                f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {shlex.quote(str(entry))}"
             )
 
 

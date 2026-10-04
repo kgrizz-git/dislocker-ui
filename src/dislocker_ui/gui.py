@@ -182,12 +182,15 @@ class DislockerApp(ttk.Frame):
 
     def _show_about(self) -> None:
         """Show the About dialog."""
-        messagebox.showinfo("About dislocker-ui", help_text.about_text(__version__))
+        messagebox.showinfo(
+            "About dislocker-ui", help_text.about_text(__version__), parent=self.master
+        )
 
     def _show_help_text(self, title: str, text: str) -> None:
         """Show a read-only help dialog (at most one per title)."""
         existing = self._help_dialogs.get(title)
         if existing is not None and existing.winfo_exists():
+            existing.deiconify()
             existing.lift()
             existing.focus_set()
             return
