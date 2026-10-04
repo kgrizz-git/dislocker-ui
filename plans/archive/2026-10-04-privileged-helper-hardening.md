@@ -1,5 +1,7 @@
 # Privileged helper hardening
 
+**Status:** Implemented (PR #10 and the elevation-hardening follow-ups through PR #14); archived 2026-10-04. One deliberately deferred follow-up, the fail-open `elevate._assert_no_writable_py_files` scan, stays in `TO_DO.md`.
+
 ## Decision
 
 Replace the elevated workflow's user-owned control files with a root-controlled,
