@@ -301,7 +301,7 @@ def unmount_volume(
         raise RunnerError(f"{error}. {manual_session_cleanup_hint(canonical_path)}")
     errors: list[str] = []
     images = _attached_disk_images(deps.hdiutil or HDIUTIL)
-    errors.extend(_unmount_ntfs(deps, session, log, images=images))
+    errors.extend(_unmount_ntfs(deps, session, log, session_path=canonical_path, images=images))
     errors.extend(_detach_raw_disk(deps, session, log, session_path=canonical_path, images=images))
     errors.extend(_unmount_fuse(deps, session, log))
     if not errors:

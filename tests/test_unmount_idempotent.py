@@ -93,11 +93,12 @@ def _mount_responder(
     other_rc: int = 0,
     other_err: str = "",
     info_images: list | None = None,
+    info_rc: int = 0,
 ) -> MagicMock:
     """Serve a fake /sbin/mount table and hdiutil image list (empty by default)."""
     mount_result = MagicMock(returncode=mount_rc, stdout=table, stderr="")
     info_result = MagicMock(
-        returncode=0, stdout=plistlib.dumps({"images": info_images or []}), stderr=b""
+        returncode=info_rc, stdout=plistlib.dumps({"images": info_images or []}), stderr=b""
     )
     other_result = MagicMock(returncode=other_rc, stdout="", stderr=other_err)
 
@@ -291,6 +292,24 @@ def test_unmount_refuses_crafted_raw_matching_foreign_disk(tmp_path: Path) -> No
             _unmount_session_file(stored, [])
     assert stored.exists()
     assert "left untouched" in str(excinfo.value)
+    assert [c for c in run.call_args_list if c.args[0][0] == _UMOUNT] == []
+
+
+def test_unmount_refuses_dev_mount_when_images_unreadable(tmp_path: Path) -> None:
+    """Without an image list, a /dev/disk mount is never unmounted."""
+    with _fuse_dir() as fuse:
+        session = _session(fuse_mount=str(fuse))
+        stored = _stored_session(tmp_path, session)
+        table = f"/dev/disk9s1 on {session.ntfs_mount} (msdos, local, noowners)\n"
+        run = _mount_responder(table=table, info_rc=1)
+        with (
+            patch("dislocker_ui.unmount_steps.subprocess.run", run),
+            pytest.raises(RunnerError, match="Could not verify /dev/disk9s1") as excinfo,
+        ):
+            _unmount_session_file(stored, [])
+    assert stored.exists()
+    assert "left untouched" in str(excinfo.value)
+    assert str(stored) in str(excinfo.value)
     assert [c for c in run.call_args_list if c.args[0][0] == _UMOUNT] == []
 
 

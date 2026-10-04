@@ -57,7 +57,10 @@ covering, in error-message-first order:
 
 - **"A session is already active" / Unmount can never finish** — explain
   the pre-0.5.3 stale-session wedge in two sentences, point at Unmount
-  first, then give the manual recovery for older releases:
+  first, then give the manual recovery for older releases. Deleting the
+  session file is allowed only after confirming no NTFS/FUSE mount remains
+  and the disk image is detached (`mount`, `hdiutil info`); otherwise the
+  app loses track of live mounts:
   `sudo rm "$HOME/Library/Application Support/dislocker-ui/active_session.json"`
   (and the root-state variant under `/var/db/dislocker-ui/<uid>/` for
   elevated sessions). Note that 0.5.3+ self-heals (cross-reference

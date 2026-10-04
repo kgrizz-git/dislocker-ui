@@ -162,12 +162,18 @@ def _unmount_ntfs(
     # must resolve to the same whole disk as our own attached image, found
     # by identity (not by trusting the recorded device number, which may be
     # reassigned or crafted). Non-/dev devices from ntfs-3g/macFUSE carry
-    # no device number and keep the old behavior, as does an unreadable
-    # image list.
+    # no device number and keep the old behavior. An unreadable image list
+    # cannot prove ownership of a /dev/disk mount, so it refuses.
     if images is None:
         images = _attached_disk_images(deps.hdiutil or HDIUTIL)
     device = (table or {}).get(session.ntfs_mount)
-    if device is not None and device.startswith("/dev/disk") and images is not None:
+    if device is not None and device.startswith("/dev/disk"):
+        if images is None:
+            log(f"Could not verify {device} at {session.ntfs_mount} is our image; not unmounting")
+            return [
+                f"Could not verify {device} at {session.ntfs_mount} is our disk image; "
+                "not unmounting. " + manual_session_cleanup_hint(session_path)
+            ]
         owned = _find_session_image(images, session)
         if owned is None or _whole_disk_id(device) != _whole_disk_id(owned):
             log(f"{session.ntfs_mount} is now a different disk ({device}); not unmounting")
