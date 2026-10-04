@@ -131,4 +131,6 @@ def test_help_dialog_recreates_after_close(tk_root: tk.Tk) -> None:
     assert not first.winfo_exists()
     cascade.invoke(1)
     rest = [w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)]
-    assert len(rest) == 1 and rest[0] is not first and rest[0].winfo_exists()
+    assert len(rest) == 1
+    assert rest[0] is not first
+    assert rest[0].winfo_exists()
