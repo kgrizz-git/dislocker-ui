@@ -59,9 +59,11 @@ def is_privileged_fuse_path(path: Path, session_path: Path | None) -> bool:
 
     The leaf is checked with an explicit ``os.lstat`` (rather than
     ``Path.is_symlink``, whose error behavior varies across Python
-    versions): any ``OSError`` — including EACCES from an unprivileged
-    process looking into the root-0700 staging dir, or ENOENT for a
-    missing entry — means "not ours".
+    versions). A missing entry still counts as ours: it cannot point
+    anywhere, and a partial cleanup that already removed it must not wedge
+    the session. Any other ``OSError`` — notably EACCES when an
+    unprivileged process looks into the root-0700 staging dir — means
+    "not ours".
     """
     if session_path is None:
         return False
@@ -70,6 +72,8 @@ def is_privileged_fuse_path(path: Path, session_path: Path | None) -> bool:
         if path.parent != staging or not path.name.startswith("session-"):
             return False
         info = os.lstat(path)
+    except FileNotFoundError:
+        return True
     except (OSError, ValueError):
         return False
     return not stat.S_ISLNK(info.st_mode)
