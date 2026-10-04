@@ -215,18 +215,22 @@ def test_unmount_dead_fuse_still_attempts_umount(tmp_path: Path) -> None:
     assert [_UMOUNT, str(fuse)] in [c.args[0] for c in run.call_args_list]
 
 
-def test_unmount_attempts_umount_when_mount_table_fails(tmp_path: Path) -> None:
-    """An unreadable table treats every target as possibly mounted."""
+def test_unmount_refuses_volume_when_mount_table_fails(tmp_path: Path) -> None:
+    """An unreadable table never force-unmounts the volume; state is kept."""
     with _fuse_dir() as fuse:
         session = _session(fuse_mount=str(fuse))
         stored = _stored_session(tmp_path, session)
         run = _mount_responder(mount_rc=1)
-        with patch("dislocker_ui.unmount_steps.subprocess.run", run):
+        with (
+            patch("dislocker_ui.unmount_steps.subprocess.run", run),
+            pytest.raises(RunnerError, match="Could not read the mount table") as excinfo,
+        ):
             _unmount_session_file(stored, [])
-    assert not stored.exists()
+    assert stored.exists()
+    assert "left untouched" in str(excinfo.value)
     attempted = [c.args[0] for c in run.call_args_list]
-    assert [_UMOUNT, session.ntfs_mount] in attempted
-    assert [_UMOUNT, session.fuse_mount] in attempted
+    assert [_UMOUNT, session.ntfs_mount] not in attempted
+    assert not any(cmd[-3:-1] == ["unmount", "force"] for cmd in attempted)
 
 
 def test_unmount_live_failure_retains_session(tmp_path: Path) -> None:

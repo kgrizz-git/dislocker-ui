@@ -154,6 +154,14 @@ def _unmount_ntfs(
 ) -> list[str]:
     """Unmount the decrypted volume mountpoint, forcing via diskutil if needed."""
     table = _mount_table()
+    if table is None:
+        # Without the mount table the device at the mountpoint is unknown,
+        # so ownership cannot be checked; never force-unmount blind.
+        log(f"Could not read the mount table; not unmounting {session.ntfs_mount}")
+        return [
+            f"Could not read the mount table to verify {session.ntfs_mount}; "
+            "not unmounting. " + manual_session_cleanup_hint(session_path)
+        ]
     if not _is_mounted_in(table, session.ntfs_mount):
         log(f"already unmounted: {session.ntfs_mount}")
         return []
@@ -166,7 +174,7 @@ def _unmount_ntfs(
     # cannot prove ownership of a /dev/disk mount, so it refuses.
     if images is None:
         images = _attached_disk_images(deps.hdiutil or HDIUTIL)
-    device = (table or {}).get(session.ntfs_mount)
+    device = table.get(session.ntfs_mount)
     if device is not None and device.startswith("/dev/disk"):
         if images is None:
             log(f"Could not verify {device} at {session.ntfs_mount} is our image; not unmounting")
