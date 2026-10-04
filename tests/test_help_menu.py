@@ -98,3 +98,14 @@ def test_help_dialogs_show_readonly_text(tk_root: tk.Tk, index: int, text: str) 
     assert len(closers) == 1
     closers[0].invoke()
     assert not dialogs[0].winfo_exists()
+
+
+def test_help_dialog_reopening_lifts_existing(tk_root: tk.Tk) -> None:
+    """Opening Usage twice yields one dialog; the second call lifts it."""
+    app = _build_app(tk_root)
+    cascade = _help_menu(app)
+    with patch.object(tk.Toplevel, "lift") as lift:
+        cascade.invoke(1)
+        cascade.invoke(1)
+    lift.assert_called_once_with()
+    assert len([w for w in tk_root.winfo_children() if isinstance(w, tk.Toplevel)]) == 1

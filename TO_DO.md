@@ -17,3 +17,14 @@ Open work only for **dislocker-ui**.
   manual verification only — mount a BitLocker volume, reboot, launch, and
   confirm Mount self-heals (or Unmount clears) with no eject of unrelated
   disks (`diskutil list` before/after).
+- Privileged-helper hardening residual ([archived plan](plans/archive/2026-10-04-privileged-helper-hardening.md)):
+  the elevation scan still follows `.py` symlinks (checking only target
+  mode bits), and `os.walk(followlinks=False)` never descends symlinked
+  directories under `src/` (they stay unscanned). Refusal is deferred:
+  on the everyday elevation path it would strand legitimate checkouts
+  (e.g. root-owned caches from a prior sudo run); `run.sh` already
+  refuses both on the rare sudo-launch path.
+- Docs/help menu (0.6.0, [archived plan](plans/archive/2026-10-04-docs-and-in-app-help.md)):
+  manual verification only — on macOS confirm the Help-only menubar keeps
+  Tk's default application menu and Cmd-Q, and that Help merges into
+  the system Help menu.

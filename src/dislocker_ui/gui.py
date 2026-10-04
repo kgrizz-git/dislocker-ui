@@ -65,6 +65,7 @@ class DislockerApp(ttk.Frame):
         self.deps: DepsStatus = _discover_deps_for_euid()
         self.disk_entries: list[DiskEntry] = []
         self._busy = False
+        self._help_dialogs: dict[str, tk.Toplevel] = {}
 
         self.volume_var = tk.StringVar()
         self.method_var = tk.StringVar(value=UnlockMethod.USER_PASSWORD.value)
@@ -184,7 +185,12 @@ class DislockerApp(ttk.Frame):
         messagebox.showinfo("About dislocker-ui", help_text.about_text(__version__))
 
     def _show_help_text(self, title: str, text: str) -> None:
-        """Show a read-only help dialog."""
+        """Show a read-only help dialog (at most one per title)."""
+        existing = self._help_dialogs.get(title)
+        if existing is not None and existing.winfo_exists():
+            existing.lift()
+            existing.focus_set()
+            return
         dialog = tk.Toplevel(self.master)
         dialog.title(title)
         dialog.transient(self.master)
@@ -193,6 +199,7 @@ class DislockerApp(ttk.Frame):
         body.configure(state="disabled")
         body.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
         ttk.Button(dialog, text="Close", command=dialog.destroy).pack(pady=(0, 8))
+        self._help_dialogs[title] = dialog
 
     def _recheck_deps(self) -> None:
         """Re-run dependency discovery."""

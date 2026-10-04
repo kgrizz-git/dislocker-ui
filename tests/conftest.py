@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import contextlib
 import os
-import tkinter as tk
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
 
 import pytest
+
+if TYPE_CHECKING:
+    import tkinter as tk
 
 
 @pytest.fixture
@@ -17,9 +20,12 @@ def tk_root() -> tk.Tk:
     """
     Create a withdrawn Tk root for headless widget tests.
 
-    Zero-delay `after(0, …)` callbacks run immediately so tests never call
-    `update()` (which can hang under macOS Tk when reusing the process).
+    tkinter is imported lazily so non-GUI tests still collect where
+    tkinter is unavailable; zero-delay `after(0, …)` callbacks run
+    immediately so tests never call `update()` (which can hang under
+    macOS Tk when reusing the process).
     """
+    tk = pytest.importorskip("tkinter")
     root = tk.Tk()
     root.withdraw()
     real_after = root.after

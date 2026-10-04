@@ -27,6 +27,7 @@ Requirements:
 from __future__ import annotations
 
 import contextlib
+import errno
 import fcntl
 import hashlib
 import json
@@ -272,6 +273,8 @@ def _assert_no_writable_py_files(src_root: Path) -> None:
     file, or directory is a trojan vector.  The scan is fail-closed on
     incompleteness: unreadable directories and stat failures raise instead
     of being skipped, since an unscanned entry could hide a writable file.
+    Symlinked directories are never descended into (documented exclusion,
+    tracked in TO_DO.md): `os.walk` runs with `followlinks=False`.
     Skips the recursive scan for pip-installed packages (site-packages /
     dist-packages) where the package manager controls file modes and scanning
     the entire directory would be prohibitively slow.  Known non-code
@@ -294,19 +297,32 @@ def _assert_no_writable_py_files(src_root: Path) -> None:
 
 def _raise_walk_error(error: OSError) -> None:
     """Fail a scan when os.walk cannot list a directory."""
-    raise _scan_blocked_error(error.filename, error.strerror)
+    raise _scan_blocked_error(error.filename, error)
 
 
 def _scan_blocked_error(path: object, detail: object) -> RunnerError:
-    """Build the fail-closed error for an unscannable scan entry."""
+    """Build the fail-closed error for an unscannable scan entry.
+
+    Dangling entries (ENOENT, e.g. broken symlinks) cannot be fixed by
+    re-owning them, so the message says to remove the entry instead.
+    """
+    location = path if path is not None else "<unknown>"
+    if isinstance(detail, OSError) and detail.errno == errno.ENOENT:
+        return RunnerError(
+            f"Refusing to elevate: cannot inspect {location} ({detail}). "
+            f"Remove the broken entry: rm {location}"
+        )
     return RunnerError(
-        f"Refusing to elevate: cannot inspect {path} ({detail}). "
-        f'Fix ownership with: sudo chown -R "$USER" {path}'
+        f"Refusing to elevate: cannot inspect {location} ({detail}). "
+        f'Fix ownership with: sudo chown "$USER" {location}'
     )
 
 
 def _check_dir_writable(dirpath: Path, src_root: Path) -> None:
-    """Raise RunnerError if *dirpath* is group/world-writable (except src_root itself)."""
+    """Raise RunnerError if *dirpath* is group/world-writable (except src_root itself).
+
+    Stat failures raise: an unscanned directory could hide writable files.
+    """
     if dirpath == src_root:
         return
     try:

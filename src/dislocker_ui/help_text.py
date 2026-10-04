@@ -51,9 +51,10 @@ for the admin-prompt path).
 "Missing required tools": run sudo scripts/install-root-deps.sh,
 then Recheck deps.
 "NTFS volume requires ntfs-3g": FAT/ExFAT works without it.
-macFUSE not approved: approve the system extension in
-System Settings, Privacy & Security (a fresh install may
-need Recovery-mode approval first), then reboot.
+macFUSE not approved: approval appears the first time you
+mount a FUSE volume (System Settings, Privacy & Security).
+On Apple Silicon, enabling kernel extensions may need
+Recovery first; then reboot.
 dislocker stops loading after brew upgrade: reinstall
 mbedtls@3 and re-create the libmbedcrypto symlink (see the
 README install section); re-run it after each upgrade.
