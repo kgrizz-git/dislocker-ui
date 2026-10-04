@@ -14,7 +14,9 @@ Outputs:
   are kept intact on one line.
 
 Requirements:
-  None; no imports, no secrets, no machine-specific paths.
+  Standard library only (just the __future__ import). Exports REPO_URL,
+  ABOUT_TEXT, USAGE_TEXT, TROUBLESHOOTING_TEXT, and about_text(). No
+  secrets and no machine-specific paths.
 """
 
 from __future__ import annotations

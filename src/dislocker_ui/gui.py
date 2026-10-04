@@ -177,7 +177,7 @@ class DislockerApp(ttk.Frame):
             command=lambda: self._show_help_text("Troubleshooting", help_text.TROUBLESHOOTING_TEXT),
         )
         menubar.add_cascade(label="Help", menu=help_menu)
-        self.master.configure(menu=menubar)
+        self.master["menu"] = menubar
 
     def _show_about(self) -> None:
         """Show the About dialog."""

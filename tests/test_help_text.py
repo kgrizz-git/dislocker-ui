@@ -51,6 +51,7 @@ def test_troubleshooting_covers_stale_session_recovery() -> None:
 def test_help_text_has_no_machine_paths(text: str) -> None:
     """Help strings never name a developer machine."""
     assert "/Users/" not in text
+    assert "/home/" not in text
 
 
 @pytest.mark.parametrize("text", _ALL_TEXTS)

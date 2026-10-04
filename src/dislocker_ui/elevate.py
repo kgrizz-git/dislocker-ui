@@ -33,6 +33,7 @@ import json
 import os
 import re
 import shlex
+import stat
 import subprocess
 import sys
 import tempfile
@@ -320,10 +321,17 @@ def _check_dir_writable(dirpath: Path, src_root: Path) -> None:
 
 
 def _check_files_writable(dirpath: Path, filenames: list[str]) -> None:
-    """Raise RunnerError if any .py/.pyc/.so in *filenames* is group/world-writable."""
+    """Raise RunnerError if any .py/.pyc/.so in *filenames* is group/world-writable.
+
+    os.walk files an entry under *filenames* when classifying it as a
+    directory fails, and then never descends into it. Any non-module name
+    that turns out to be a real directory therefore means part of the tree
+    went unscanned, which fails closed like an unreadable directory.
+    """
     for name in filenames:
         entry = dirpath / name
         if entry.suffix not in (".py", ".pyc", ".so"):
+            _check_unclassified_entry(entry)
             continue
         try:
             mode = entry.stat().st_mode
@@ -334,6 +342,16 @@ def _check_files_writable(dirpath: Path, filenames: list[str]) -> None:
                 f"Refusing to elevate: {entry} is group/world-writable "
                 f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {entry}"
             )
+
+
+def _check_unclassified_entry(entry: Path) -> None:
+    """Fail the scan when a non-module entry is a directory os.walk skipped."""
+    try:
+        mode = os.lstat(entry).st_mode
+    except OSError as exc:
+        raise _scan_blocked_error(entry, exc) from exc
+    if stat.S_ISDIR(mode):
+        raise _scan_blocked_error(entry, "directory was not scanned")
 
 
 def _is_system_managed_install(src_root: Path) -> bool:
