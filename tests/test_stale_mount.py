@@ -96,6 +96,10 @@ def _stale_responder(
     return MagicMock(side_effect=_fake)
 
 
+def _ignore_log(_message: str) -> None:
+    """Discard log lines."""
+
+
 @contextlib.contextmanager
 def _volume(tmp_path: Path) -> Iterator[str]:
     """Create a real file to mount; yield its path."""
@@ -199,30 +203,31 @@ def test_validate_mount_request_blocks_live_session(tmp_path: Path) -> None:
     stored = _stored_session(tmp_path, session)
     table = f"/dev/disk9 on {session.ntfs_mount} (ntfs, local)\n/dev/disk9 on {session.fuse_mount} (msdos)\n"
     run = _stale_responder(table=table)
-    with (
-        _volume(tmp_path) as volume,
-        patch("dislocker_ui.unmount_steps.subprocess.run", run),
-        pytest.raises(RunnerError, match="already active"),
-    ):
-        _validate_mount_request(_req(volume), _deps(), lambda _m: None, session_path=stored)
+    deps = _deps()
+    with _volume(tmp_path) as volume, patch("dislocker_ui.unmount_steps.subprocess.run", run):
+        req = _req(volume)
+        with pytest.raises(RunnerError, match="already active"):
+            _validate_mount_request(req, deps, _ignore_log, session_path=stored)
     assert stored.exists()
 
 
 def test_validate_mount_request_blocks_when_state_unknown(tmp_path: Path) -> None:
     """An unreadable table or image list is never treated as stale."""
     stored = _stored_session(tmp_path, _stale_session())
+    deps = _deps()
     with _volume(tmp_path) as volume:
+        req = _req(volume)
         with (
             patch("dislocker_ui.unmount_steps._mounted_paths", return_value=None),
             pytest.raises(RunnerError, match="already active"),
         ):
-            _validate_mount_request(_req(volume), _deps(), lambda _m: None, session_path=stored)
+            _validate_mount_request(req, deps, _ignore_log, session_path=stored)
         run = _stale_responder(info_rc=1)
         with (
             patch("dislocker_ui.unmount_steps.subprocess.run", run),
             pytest.raises(RunnerError, match="already active"),
         ):
-            _validate_mount_request(_req(volume), _deps(), lambda _m: None, session_path=stored)
+            _validate_mount_request(req, deps, _ignore_log, session_path=stored)
     assert stored.exists()
 
 
@@ -230,12 +235,11 @@ def test_validate_mount_request_blocks_invalid_session(tmp_path: Path) -> None:
     """A session failing path validation is never stale."""
     stored = _stored_session(tmp_path, _stale_session(raw_disk="bogus"))
     run = _stale_responder()
-    with (
-        _volume(tmp_path) as volume,
-        patch("dislocker_ui.unmount_steps.subprocess.run", run),
-        pytest.raises(RunnerError, match="already active"),
-    ):
-        _validate_mount_request(_req(volume), _deps(), lambda _m: None, session_path=stored)
+    deps = _deps()
+    with _volume(tmp_path) as volume, patch("dislocker_ui.unmount_steps.subprocess.run", run):
+        req = _req(volume)
+        with pytest.raises(RunnerError, match="already active"):
+            _validate_mount_request(req, deps, _ignore_log, session_path=stored)
     assert stored.exists()
 
 
@@ -264,6 +268,7 @@ def test_mount_volume_precheck_blocks_live_session(tmp_path: Path) -> None:
     stored = _stored_session(tmp_path, session)
     table = f"/dev/disk9 on {session.ntfs_mount} (ntfs, local)\n"
     run = _stale_responder(table=table)
+    req, deps = _req("/dev/disk2s1"), _deps()
     with (
         patch("dislocker_ui.elevate.needs_elevation", return_value=True),
         patch("dislocker_ui.runner.active_session_path_for_user", return_value=stored),
@@ -272,7 +277,7 @@ def test_mount_volume_precheck_blocks_live_session(tmp_path: Path) -> None:
         patch("dislocker_ui.unmount_steps.subprocess.run", run),
         pytest.raises(RunnerError, match="already active"),
     ):
-        mount_volume(_req("/dev/disk2s1"), _deps(), lambda _m: None)
+        mount_volume(req, deps, _ignore_log)
     elev.assert_not_called()
     txn.assert_not_called()
     assert stored.exists()

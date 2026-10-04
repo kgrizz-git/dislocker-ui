@@ -267,13 +267,14 @@ def test_unmount_as_root_rejects_foreign_owned_session(tmp_path: Path) -> None:
     """Running as root, a session file owned by someone else is distrusted."""
     stored = _stored_session(tmp_path, _session(fuse_mount="x"))
     assert os.lstat(stored).st_uid != 0
+    deps = _deps()
     with (
         patch("os.geteuid", return_value=0),
         patch("dislocker_ui.elevate.needs_elevation", return_value=False),
         patch("dislocker_ui.runner.legacy_session_present", return_value=False),
         pytest.raises(RunnerError, match="not owned by root"),
     ):
-        unmount_volume(_deps(), lambda _m: None, session_path=stored)
+        unmount_volume(deps, print, session_path=stored)
     assert stored.exists()
 
 

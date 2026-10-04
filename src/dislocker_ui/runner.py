@@ -59,6 +59,7 @@ from dislocker_ui.session import (
     session_owner_mismatch,
 )
 from dislocker_ui.unmount_steps import (
+    HDIUTIL,
     RunnerError,
     _attached_disk_images,
     _detach_raw_disk,
@@ -125,7 +126,7 @@ def mount_volume(
         # pre-check cannot validate elevated sessions (root-0700 staging is
         # unreadable), so those keep blocking here and fall through to Unmount.
         if existing is not None and not session_targets_gone(
-            existing, deps.hdiutil or "/usr/bin/hdiutil", canonical_path
+            existing, deps.hdiutil or HDIUTIL, canonical_path
         ):
             raise RunnerError(
                 "A session is already active. Click Unmount before mounting again.\n"
@@ -286,15 +287,7 @@ def unmount_volume(
     require_owner: int | None = 0 if os.geteuid() == 0 else None
     session = load_session(canonical_path, require_owner=require_owner)
     if session is None:
-        if require_owner is not None and session_owner_mismatch(canonical_path, require_owner):
-            raise RunnerError(
-                "Session file is not owned by root and cannot be trusted. "
-                + _manual_session_cleanup_hint(canonical_path)
-            )
-        # Probe the old user-owned path, never the trusted canonical state path.
-        if legacy_session_present():
-            raise RunnerError(_legacy_session_recovery_message())
-        raise RunnerError("No active session found to unmount")
+        raise _missing_session_error(canonical_path, require_owner)
 
     if session.elevated and needs_elevation():
         with elevation_transaction() as (_sess_path, log_path):
@@ -321,6 +314,19 @@ def unmount_volume(
         raise RunnerError("Unmount incomplete; state was retained for retry:\n" + "\n".join(errors))
     else:
         log("Unmounted successfully")
+
+
+def _missing_session_error(canonical_path: Path | None, require_owner: int | None) -> RunnerError:
+    """Explain why no trusted session could be loaded for unmount."""
+    if require_owner is not None and session_owner_mismatch(canonical_path, require_owner):
+        return RunnerError(
+            "Session file is not owned by root and cannot be trusted. "
+            + _manual_session_cleanup_hint(canonical_path)
+        )
+    # Probe the old user-owned path, never the trusted canonical state path.
+    if legacy_session_present():
+        return RunnerError(_legacy_session_recovery_message())
+    return RunnerError("No active session found to unmount")
 
 
 def _manual_session_cleanup_hint(canonical_path: Path | None) -> str:
@@ -391,7 +397,7 @@ def _validate_mount_request(
     existing = load_session(session_path, require_owner=require_owner)
     if existing is not None:
         # Authoritative: a fully-stale session is cleared instead of blocking.
-        if session_targets_gone(existing, deps.hdiutil or "/usr/bin/hdiutil", session_path):
+        if session_targets_gone(existing, deps.hdiutil or HDIUTIL, session_path):
             log(f"Stale session for {existing.ntfs_mount} found; clearing it automatically…")
             clear_session(session_path)
             # Drop the leftover empty mountpoint dir so the fresh mount does
@@ -559,12 +565,12 @@ def _best_effort_cleanup(
     if ntfs_mount.exists():
         subprocess.run(["/sbin/umount", str(ntfs_mount)], check=False, capture_output=True)
     if raw_disk:
-        images = _attached_disk_images("/usr/bin/hdiutil")
+        images = _attached_disk_images(HDIUTIL)
         expected = _expected_image_path(str(fuse_mount), "dislocker-file")
         actual = images.get(raw_disk) if images is not None else None
         if actual is not None and _normalized_hdiutil_image_path(actual) == expected:
             subprocess.run(
-                ["/usr/bin/hdiutil", "detach", "-force", raw_disk],
+                [HDIUTIL, "detach", "-force", raw_disk],
                 check=False,
                 capture_output=True,
             )

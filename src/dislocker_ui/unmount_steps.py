@@ -38,6 +38,8 @@ from dislocker_ui.mount_policy import (
 )
 from dislocker_ui.session import MountSession
 
+HDIUTIL = "/usr/bin/hdiutil"
+
 LogFn = Callable[[str], None]
 
 
@@ -181,8 +183,13 @@ def _attached_disk_images(hdiutil: str) -> dict[str, str] | None:
         return None
     if not isinstance(info, dict) or not isinstance(info.get("images"), list):
         return None
+    return _image_device_map(info["images"])
+
+
+def _image_device_map(images: list[object]) -> dict[str, str]:
+    """Map each image's system-entity devices to its decoded image path."""
     found: dict[str, str] = {}
-    for image in info["images"]:
+    for image in images:
         if not isinstance(image, dict) or not isinstance(image.get("image-path"), str):
             continue
         # Percent-decoding applies to the hdiutil side only; session paths
@@ -246,7 +253,7 @@ def session_targets_gone(
 def session_looks_stale(session: MountSession, session_path: Path | None = None) -> bool:
     """Advisory staleness hint for GUI status; never raises."""
     try:
-        return session_targets_gone(session, "/usr/bin/hdiutil", session_path)
+        return session_targets_gone(session, HDIUTIL, session_path)
     except Exception:
         return False
 
@@ -257,7 +264,7 @@ def _detach_raw_disk(deps: DepsStatus, session: MountSession, log: LogFn) -> lis
     A device number recorded before a reboot may now belong to an unrelated
     disk; detaching it blind would eject someone else's drive.
     """
-    images = _attached_disk_images(deps.hdiutil or "/usr/bin/hdiutil")
+    images = _attached_disk_images(deps.hdiutil or HDIUTIL)
     if images is None:
         return [f"Could not verify {session.raw_disk} is still our disk image; not detaching"]
     if not _image_identity_ok(images, session.raw_disk, session):
