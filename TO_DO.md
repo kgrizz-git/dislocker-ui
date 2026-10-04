@@ -13,11 +13,6 @@ Open work only for **dislocker-ui**.
 
 ## Active
 
-- [Documentation and in-app help](plans/2026-10-01-docs-and-in-app-help.md):
-  add README Troubleshooting section (stale-session recovery, missing
-  tools, macFUSE/TCC, mbedtls symlink), and a minimal in-app Help menu
-  (About / Usage / Troubleshooting) with text in a new `help_text.py`.
-  Extend the minimal Troubleshooting section shipped in 0.5.3.
 - Stale-session fix (0.5.3, [archived plan](plans/archive/2026-10-03-stale-session-unmount.md)):
   manual verification only — mount a BitLocker volume, reboot, launch, and
   confirm Mount self-heals (or Unmount clears) with no eject of unrelated

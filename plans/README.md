@@ -27,5 +27,5 @@ Tracked implementation plans for **dislocker-ui**.
 
 ## Active plans
 
-- [Documentation and in-app help](2026-10-01-docs-and-in-app-help.md):
-  README troubleshooting section plus a minimal in-app Help menu.
+
+None right now. Finished plans are in [`archive/`](archive/).

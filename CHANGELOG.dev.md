@@ -6,6 +6,17 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.6.0] - 2026-10-04
+
+### Changed
+
+- New `help_text.py` module holding the Help menu About / Usage /
+  Troubleshooting strings, keeping `gui.py` thin.
+- `tk_root` Tk fixture moved to `tests/conftest.py`, shared by
+  `tests/test_gui.py` and the new `tests/test_help_menu.py`;
+  `tests/test_help_text.py` covers the help constants.
+- Archived the privileged-helper hardening plan.
+
 ## [0.5.3] - 2026-10-03
 
 ### Changed

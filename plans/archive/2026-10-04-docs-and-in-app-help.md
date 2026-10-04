@@ -1,7 +1,7 @@
 # Documentation and In-App Help
 
 **Created:** 2026-10-01
-**Status:** Active
+**Status:** Implemented 2026-10-04 in 0.6.0
 **Target Version:** 0.6.0 (user-visible in-app help) — or folded into the
 0.5.3 stale-session release if convenient
 **Branch:** drafted on `fix/stale-session-unmount`
@@ -139,14 +139,14 @@ than rewriting it.
 
 ## Implementation Plan
 
-- [ ] `src/dislocker_ui/help_text.py` — ABOUT_TEXT, USAGE_TEXT,
+- [x] `src/dislocker_ui/help_text.py` — ABOUT_TEXT, USAGE_TEXT,
       TROUBLESHOOTING_TEXT constants (+ dialog helper if the Text-widget
       dialog earns >10 lines in gui.py).
-- [ ] `gui.py` — menubar + Help menu wiring in `_build()`; three
+- [x] `gui.py` — menubar + Help menu wiring in `_build()`; three
       callbacks. No other behavioral changes.
-- [ ] `README.md` — Troubleshooting section (D1).
-- [ ] `VERSION` + `CHANGELOG.md` (and/or `CHANGELOG.dev.md` per D4).
-- [ ] Tests in a **new** `tests/test_help_menu.py`. `tests/test_gui.py` is
+- [x] `README.md` — Troubleshooting section (D1).
+- [x] `VERSION` + `CHANGELOG.md` (and/or `CHANGELOG.dev.md` per D4).
+- [x] Tests in a **new** `tests/test_help_menu.py`. `tests/test_gui.py` is
       already 691 lines (soft cap 600, hard cap 750), so do not grow it.
       Reuse its Tk root fixture pattern (move it to `tests/conftest.py`
       if both files need it):
@@ -159,7 +159,7 @@ than rewriting it.
       - (Moved) The stale-session status-label test belongs to the
         stale-session plan (its D7). The post-operation refresh already
         exists at gui.py:389 and gui.py:434.
-- [ ] Gates: `python3 -m compileall -q src`, ruff check + format,
+- [x] Gates: `python3 -m compileall -q src`, ruff check + format,
       `pytest --cov` (≥80%), `python3 hooks/check_file_size.py`,
       `python3 hooks/check_absolute_paths.py`.
 

@@ -33,6 +33,7 @@ BitLocker cryptography and should not vendor dislocker sources.
 | `privileged.py` | Root child: validate request, run pipeline |
 | `ntfs_mount.py` | ntfs-3g options / ownership helpers |
 | `gui.py` | tkinter UI |
+| `help_text.py` | Help menu text: About / Usage / Troubleshooting |
 | `__main__.py` | Entry point |
 
 Prefer extending these modules over adding a second parallel flow.
