@@ -13,6 +13,7 @@ Requirements:
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from pathlib import Path
@@ -514,6 +515,76 @@ def test_assert_no_writable_py_files_scans_subdirectories(tmp_path: Path) -> Non
         _assert_no_writable_py_files(root)
 
 
+def test_assert_no_writable_py_files_unreadable_dir_raises(tmp_path: Path) -> None:
+    """An unreadable subdirectory fails the scan instead of being skipped."""
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    pkg = tmp_path / "pkg"
+    locked = pkg / "locked"
+    locked.mkdir(parents=True)
+    real_scandir = os.scandir
+
+    def _scandir(path: object, *args: object, **kwargs: object) -> object:
+        if str(path) == str(locked):
+            raise PermissionError(13, "Permission denied", str(locked))
+        return real_scandir(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    with (
+        patch("os.scandir", side_effect=_scandir),
+        pytest.raises(RunnerError, match="locked") as excinfo,
+    ):
+        _assert_no_writable_py_files(pkg)
+    assert "chown" in str(excinfo.value)
+
+
+def test_assert_no_writable_py_files_stat_error_raises(tmp_path: Path) -> None:
+    """Unstattable files and dirs fail the scan instead of being skipped."""
+    from dislocker_ui.elevate import _check_dir_writable, _check_files_writable
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    mod = pkg / "mod.py"
+    mod.write_text("", encoding="utf-8")
+    real_stat = os.stat
+
+    def _stat(path: object, *args: object, **kwargs: object) -> os.stat_result:
+        if str(path) == str(mod):
+            raise OSError("cannot stat")
+        return real_stat(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    with (
+        patch("os.stat", side_effect=_stat),
+        pytest.raises(RunnerError, match=r"mod\.py") as excinfo,
+    ):
+        _check_files_writable(pkg, ["mod.py"])
+    assert "chown" in str(excinfo.value)
+    with (
+        patch("os.stat", side_effect=OSError("cannot stat")),
+        pytest.raises(RunnerError, match="pkg"),
+    ):
+        _check_dir_writable(pkg, tmp_path)
+
+
+def test_assert_no_writable_py_files_pruned_dirs_skipped_even_unreadable(
+    tmp_path: Path,
+) -> None:
+    """Pruned cache dirs are never descended into, unreadable or not."""
+    from dislocker_ui.elevate import _assert_no_writable_py_files
+
+    pkg = tmp_path / "pkg"
+    cache = pkg / ".git"
+    cache.mkdir(parents=True)
+    real_scandir = os.scandir
+
+    def _scandir(path: object, *args: object, **kwargs: object) -> object:
+        if str(path) == str(cache):
+            raise AssertionError("pruned dir must not be scanned")
+        return real_scandir(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    with patch("os.scandir", side_effect=_scandir):
+        _assert_no_writable_py_files(pkg)
+
+
 @pytest.mark.parametrize("dirname", ["site-packages", "dist-packages"])
 def test_assert_no_writable_py_files_skips_root_owned_system_managed(
     tmp_path: Path, dirname: str
@@ -598,7 +669,7 @@ def test_assert_no_writable_py_files_rejects_writable_so(tmp_path: Path) -> None
 
 
 def test_assert_no_writable_py_files_handles_stat_oserror(tmp_path: Path) -> None:
-    """A broken symlink (target deleted) does not abort the scan."""
+    """A broken symlink (target deleted) fails the scan instead of being skipped."""
     from dislocker_ui.elevate import _assert_no_writable_py_files
 
     root = tmp_path / "pkg"
@@ -608,7 +679,9 @@ def test_assert_no_writable_py_files_handles_stat_oserror(tmp_path: Path) -> Non
     ok = root / "mod.py"
     ok.write_text("", encoding="utf-8")
     ok.chmod(0o644)
-    _assert_no_writable_py_files(root)
+    with pytest.raises(RunnerError, match="broken") as excinfo:
+        _assert_no_writable_py_files(root)
+    assert "chown" in str(excinfo.value)
 
 
 def test_is_system_managed_install_requires_root_ownership(tmp_path: Path) -> None:

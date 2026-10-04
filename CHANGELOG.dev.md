@@ -16,6 +16,9 @@ Version numbers match `VERSION` / SemVer with the public changelog.
   `tests/test_gui.py` and the new `tests/test_help_menu.py`;
   `tests/test_help_text.py` covers the help constants.
 - Archived the privileged-helper hardening plan.
+- The osascript preflight writable-Python scan is now fail-closed on
+  incompleteness: unreadable directories and stat failures raise
+  (with an ownership-fix hint) instead of being skipped.
 
 ## [0.5.3] - 2026-10-03
 

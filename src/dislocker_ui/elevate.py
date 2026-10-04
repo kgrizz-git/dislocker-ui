@@ -268,17 +268,21 @@ def _assert_no_writable_py_files(src_root: Path) -> None:
     """Refuse elevation if any .py, .pyc, .so, directory, or __pycache__ under *src_root* is writable.
 
     Root imports these modules via PYTHONPATH; a writable source file, bytecode
-    file, or directory is a trojan vector.  Skips the recursive scan for
-    pip-installed packages (site-packages / dist-packages) where the package
-    manager controls file modes and scanning the entire directory would be
-    prohibitively slow.  Known non-code directories (build artifacts, caches,
-    VCS metadata) are pruned before descent to avoid false positives on
-    ``pip install -e`` checkouts.
+    file, or directory is a trojan vector.  The scan is fail-closed on
+    incompleteness: unreadable directories and stat failures raise instead
+    of being skipped, since an unscanned entry could hide a writable file.
+    Skips the recursive scan for pip-installed packages (site-packages /
+    dist-packages) where the package manager controls file modes and scanning
+    the entire directory would be prohibitively slow.  Known non-code
+    directories (build artifacts, caches, VCS metadata) are pruned before
+    descent to avoid false positives on ``pip install -e`` checkouts.
     """
     if _is_system_managed_install(src_root):
         return
     src_str = str(src_root)
-    for dirpath_str, dirnames, filenames in os.walk(src_str, topdown=True):
+    for dirpath_str, dirnames, filenames in os.walk(
+        src_str, topdown=True, onerror=_raise_walk_error
+    ):
         dirpath = Path(dirpath_str)
         dirnames[:] = [
             d for d in dirnames if d not in _NON_CODE_DIRS and not d.endswith(".egg-info")
@@ -287,14 +291,27 @@ def _assert_no_writable_py_files(src_root: Path) -> None:
         _check_files_writable(dirpath, filenames)
 
 
+def _raise_walk_error(error: OSError) -> None:
+    """Fail a scan when os.walk cannot list a directory."""
+    raise _scan_blocked_error(error.filename, error.strerror)
+
+
+def _scan_blocked_error(path: object, detail: object) -> RunnerError:
+    """Build the fail-closed error for an unscannable scan entry."""
+    return RunnerError(
+        f"Refusing to elevate: cannot inspect {path} ({detail}). "
+        f'Fix ownership with: sudo chown -R "$USER" {path}'
+    )
+
+
 def _check_dir_writable(dirpath: Path, src_root: Path) -> None:
     """Raise RunnerError if *dirpath* is group/world-writable (except src_root itself)."""
     if dirpath == src_root:
         return
     try:
         mode = dirpath.stat().st_mode
-    except OSError:
-        return
+    except OSError as exc:
+        raise _scan_blocked_error(dirpath, exc) from exc
     if mode & 0o022:
         raise RunnerError(
             f"Refusing to elevate: directory {dirpath} is group/world-writable "
@@ -310,8 +327,8 @@ def _check_files_writable(dirpath: Path, filenames: list[str]) -> None:
             continue
         try:
             mode = entry.stat().st_mode
-        except OSError:
-            continue
+        except OSError as exc:
+            raise _scan_blocked_error(entry, exc) from exc
         if mode & 0o022:
             raise RunnerError(
                 f"Refusing to elevate: {entry} is group/world-writable "

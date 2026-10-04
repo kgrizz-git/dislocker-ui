@@ -27,5 +27,4 @@ Tracked implementation plans for **dislocker-ui**.
 
 ## Active plans
 
-
 None right now. Finished plans are in [`archive/`](archive/).
