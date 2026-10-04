@@ -282,7 +282,7 @@ class DislockerApp(ttk.Frame):
             self.volume_var.set(values[0])
 
     def _refresh_session_status(self) -> None:
-        """Show whether a session is currently recorded."""
+        """Show whether a session is currently recorded, with a staleness hint."""
         session_path = active_session_path_for_user()
         session = load_session(session_path)
         if session:

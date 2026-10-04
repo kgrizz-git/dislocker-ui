@@ -286,10 +286,14 @@ freeze — tracked as a stretch item.
 - [x] GUI status label appends a "looks stale" hint (D7), via a non-GUI
       helper.
 
-### 4. Tests (new file `tests/test_unmount_stale.py`)
+### 4. Tests (real step functions at the `subprocess` boundary)
 
 Exercise the **real** step functions (patch at the `subprocess`/`_run`
-boundary, not by mocking the steps themselves):
+boundary, not by mocking the steps themselves), across
+`tests/test_session_validation.py`, `tests/test_unmount_idempotent.py`,
+`tests/test_detach_identity.py`, `tests/test_stale_mount.py`,
+`tests/test_gui_stale_status.py` (plus `tests/test_privileged.py` for the
+root-child unmount):
 
 - [x] Stale session unmount: no target exists → `unmount_volume` returns
       cleanly, session file is deleted, no subprocess detach/umount of
@@ -364,7 +368,9 @@ boundary, not by mocking the steps themselves):
 - [x] `python3 -m compileall -q src`
 - [x] `ruff check src tests hooks` + `ruff format --check src tests hooks`
 - [x] `pytest --cov --cov-report=term-missing` (≥80%, no C901)
-- [x] `python3 hooks/check_file_size.py` (runner.py stays <750)
+- [x] `python3 hooks/check_file_size.py` (runner.py stays <750;
+      three pre-existing soft-cap warnings: `scripts/install-root-deps.sh`,
+      `tests/test_elevate.py`, `tests/test_gui.py`)
 - [ ] Manual: mount a BitLocker volume, reboot, launch, confirm Mount
       self-heals (or Unmount clears) without the wedge; confirm no eject
       of unrelated disks (verify via `diskutil list` before/after).

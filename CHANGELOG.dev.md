@@ -18,6 +18,11 @@ Version numbers match `VERSION` / SemVer with the public changelog.
   `tests/test_session_validation.py`,
   `tests/test_unmount_idempotent.py`, `tests/test_detach_identity.py`,
   `tests/test_stale_mount.py`, and `tests/test_gui_stale_status.py`.
+- `_run_with_fallback` returns no error when the fallback succeeds (the
+  primary error stays in the log); both failures still return both errors.
+- `/sbin/mount` and `hdiutil info` subprocess calls are bounded by a
+  10-second timeout (unknown state on expiry), so GUI status reads cannot
+  hang on a wedged helper.
 
 ## [0.5.2] - 2026-09-15
 

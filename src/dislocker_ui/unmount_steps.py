@@ -4,8 +4,11 @@ Unmount steps for dislocker-ui.
 Overall purpose:
   Implement the individual Unmount stages (NTFS umount, raw-disk detach,
   FUSE umount, staging and mountpoint cleanup) plus the shared subprocess
-  helpers they are built on. The orchestration facade (unmount_volume)
-  stays in runner.py and calls these step functions.
+  helpers they are built on. This module is the shared step and identity
+  layer: mount-table liveness, disk-image identity, and the boolean
+  helpers `session_targets_gone` / `session_looks_stale` used by mount
+  validation and the GUI. The orchestration facades (mount/unmount_volume)
+  stay in runner.py and call these step functions.
 
 Inputs:
   DepsStatus, MountSession, log fn.
@@ -125,27 +128,32 @@ def _is_mounted(path: str) -> bool:
     unmounted, and a wedged daemon could hang the stat outright. When the
     table itself is unavailable, assume the target is mounted.
     """
-    mounted = _mounted_paths()
-    if mounted is None:
+    return _is_mounted_in(_mount_table(), path)
+
+
+def _is_mounted_in(table: dict[str, str] | None, path: str) -> bool:
+    """Membership test against an already-read table; None means mounted."""
+    if table is None:
         return True
-    if path in mounted:
+    if path in table:
         return True
     # Tolerate /tmp vs /private/tmp style aliases by resolving the parent
     # only; the target itself is never statted.
     parent = os.path.dirname(path)
     aliased = os.path.join(os.path.realpath(parent), os.path.basename(path))
-    return aliased in mounted
+    return aliased in table
 
 
 def _unmount_ntfs(deps: DepsStatus, session: MountSession, log: LogFn) -> list[str]:
     """Unmount the decrypted volume mountpoint, forcing via diskutil if needed."""
-    if not _is_mounted(session.ntfs_mount):
+    table = _mount_table()
+    if not _is_mounted_in(table, session.ntfs_mount):
         log(f"already unmounted: {session.ntfs_mount}")
         return []
     # A reassigned /Volumes mountpoint may now belong to another disk;
     # unmounting it would yank someone else's volume (non-/dev devices from
     # ntfs-3g/macFUSE carry no device number and keep the old behavior).
-    device = (_mount_table() or {}).get(session.ntfs_mount)
+    device = (table or {}).get(session.ntfs_mount)
     if (
         device is not None
         and device.startswith("/dev/disk")
@@ -242,7 +250,8 @@ def session_targets_gone(
     """
     if session_paths_error(session, session_path) is not None:
         return False
-    if _is_mounted(session.ntfs_mount) or _is_mounted(session.fuse_mount):
+    table = _mount_table()
+    if _is_mounted_in(table, session.ntfs_mount) or _is_mounted_in(table, session.fuse_mount):
         return False
     images = _attached_disk_images(hdiutil)
     if images is None:

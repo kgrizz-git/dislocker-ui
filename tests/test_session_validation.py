@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from conftest import fake_root_owned
 from dislocker_ui.deps import DepsStatus
 from dislocker_ui.mount_policy import session_paths_error
 from dislocker_ui.runner import RunnerError, unmount_volume
@@ -72,41 +73,6 @@ def _unmount_session_file(session_path: Path, logs: list[str]) -> None:
         unmount_volume(_deps(), logs.append, session_path=session_path)
 
 
-@contextlib.contextmanager
-def _fake_root_owned(path: Path) -> Iterator[None]:
-    """Report *path* as uid-0-owned through os.open/os.fstat (root simulation)."""
-    real_open, real_fstat = os.open, os.fstat
-    owned: set[int] = set()
-
-    def _open(file: object, flags: int, *args: object, **kwargs: object) -> int:
-        fd = real_open(file, flags, *args, **kwargs)  # type: ignore[arg-type]
-        if isinstance(file, str | bytes | os.PathLike) and os.path.abspath(file) == str(path):
-            owned.add(fd)
-        return fd
-
-    def _fstat(fd: int) -> os.stat_result:
-        st = real_fstat(fd)
-        if fd in owned:
-            st = os.stat_result(
-                (
-                    st.st_mode,
-                    st.st_ino,
-                    st.st_dev,
-                    st.st_nlink,
-                    0,
-                    st.st_gid,
-                    st.st_size,
-                    st.st_atime,
-                    st.st_mtime,
-                    st.st_ctime,
-                )
-            )
-        return st
-
-    with patch("os.open", side_effect=_open), patch("os.fstat", side_effect=_fstat):
-        yield
-
-
 @pytest.mark.skipif(os.geteuid() == 0, reason="needs a non-root file owner")
 def test_unmount_as_root_accepts_root_looking_session(tmp_path: Path) -> None:
     """Running as root, a root-owned session file unmounts normally."""
@@ -138,7 +104,7 @@ def test_unmount_as_root_accepts_root_looking_session(tmp_path: Path) -> None:
             patch("dislocker_ui.elevate.needs_elevation", return_value=False),
             patch("dislocker_ui.runner.legacy_session_present", return_value=False),
             patch("dislocker_ui.unmount_steps.subprocess.run", run),
-            _fake_root_owned(stored),
+            fake_root_owned(stored),
         ):
             unmount_volume(_deps(), logs.append, session_path=stored)
     finally:

@@ -72,7 +72,6 @@ from dislocker_ui.unmount_steps import (
     session_targets_gone,
 )
 from dislocker_ui.unmount_steps import _run as _run
-from dislocker_ui.unmount_steps import _run_with_fallback as _run_with_fallback
 
 LogFn = Callable[[str], None]
 
@@ -122,9 +121,10 @@ def mount_volume(
         existing = load_session(canonical_path)
         # Advisory only: a stale-looking session does not block here (and is
         # never cleared — the root child decides authoritatively). A wrong
-        # "stale" guess costs one admin prompt at most. Note the unprivileged
-        # pre-check cannot validate elevated sessions (root-0700 staging is
-        # unreadable), so those keep blocking here and fall through to Unmount.
+        # "stale" guess costs one admin prompt at most. This relies on the
+        # unprivileged process being unable to lstat inside the root-0700
+        # staging dir, so elevated sessions validate as invalid → not stale,
+        # keep blocking here, and fall through to Unmount.
         if existing is not None and not session_targets_gone(
             existing, deps.hdiutil or HDIUTIL, canonical_path
         ):
@@ -294,7 +294,7 @@ def unmount_volume(
             run_elevated_unmount(log, log_path=log_path)
         return
 
-    error = session_paths_error(session, session_path)
+    error = session_paths_error(session, canonical_path)
     if error:
         raise RunnerError(f"{error}. {_manual_session_cleanup_hint(canonical_path)}")
     errors: list[str] = []

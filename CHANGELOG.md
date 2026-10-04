@@ -17,12 +17,23 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 - Raw-disk detach now verifies the device is still attached as the session's
   own disk image before detaching, so a stale session can never eject a
   reassigned device that reused the old device number.
-- A fully-stale session no longer blocks mounting: Mount detects it, clears
-  it, and proceeds. The status line flags such sessions ("looks stale; click
-  Unmount to clean up").
+- A fully-stale session no longer blocks mounting under `sudo ./run.sh`:
+  Mount detects it, clears it, and proceeds; sessions from the
+  administrator-prompt path still need one click on Unmount. Under
+  `sudo ./run.sh` the status line also flags such sessions ("looks stale;
+  click Unmount to clean up").
 - Session paths are validated before any unmount cleanup runs, so a crafted
   session record cannot drive privileged removal outside the trusted
   staging, temp, and `/Volumes` locations.
+
+### Security
+
+- Session files are opened without following symlinks, and a session file
+  read as root must be root-owned or it is distrusted and unmount refuses
+  to act on it.
+- Unmount refuses to touch a `/Volumes` mountpoint that is now held by a
+  different disk device; the session is kept and the error names the
+  device, so nothing is yanked out from under another volume.
 
 ## [0.5.2] - 2026-09-15
 

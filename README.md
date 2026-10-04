@@ -213,8 +213,9 @@ real mounts.
 - **"A session is already active" after a reboot, or Unmount never finishes:**
   click **Unmount** — 0.5.3+ detects the stale session and cleans it up.
   On older releases remove the session file manually (`sudo ./run.sh`):
-  `sudo rm "$HOME/Library/Application Support/dislocker-ui/active_session.json"`,
-  or `sudo rm /var/db/dislocker-ui/<uid>/active_session.json` (admin-prompt path).
+  `sudo rm "/var/root/Library/Application Support/dislocker-ui/active_session.json"`
+  (use your own `$HOME` instead of `/var/root` if your sudo preserves it), or
+  `sudo rm /var/db/dislocker-ui/<uid>/active_session.json` (admin-prompt path).
   Leftover empty `/Volumes/DislockerUI*` dirs are harmless; remove extras with `sudo rmdir`.
 
 ## Layout

@@ -27,8 +27,8 @@ import pytest
 
 from dislocker_ui.deps import DepsStatus
 from dislocker_ui.runner import RunnerError, unmount_volume
-from dislocker_ui.session import MountSession, save_session
-from dislocker_ui.unmount_steps import _is_mounted, _mounted_paths
+from dislocker_ui.session import MountSession, load_session, save_session
+from dislocker_ui.unmount_steps import _is_mounted, _mounted_paths, session_looks_stale
 
 _NTFS_MOUNT = "/Volumes/DislockerUI-stale-probe"
 _UMOUNT = "/bin/umount"
@@ -131,10 +131,10 @@ def test_mounted_paths_returns_none_when_listing_fails() -> None:
 
 def test_is_mounted_matches_exact_and_aliased_paths() -> None:
     """Exact hits and /tmp vs /private/tmp aliases count as mounted."""
-    table = {"/private/tmp/dislocker-ui-x"}
+    table = {"/private/tmp/dislocker-ui-x": "/dev/disk9"}
     realpath = lambda p: "/private/tmp" if p == "/tmp" else p  # noqa: E731  # nosec B108 - fixture path, never created
     with (
-        patch("dislocker_ui.unmount_steps._mounted_paths", return_value=table),
+        patch("dislocker_ui.unmount_steps._mount_table", return_value=table),
         patch("os.path.realpath", side_effect=realpath),
     ):
         assert _is_mounted("/private/tmp/dislocker-ui-x")
@@ -142,9 +142,18 @@ def test_is_mounted_matches_exact_and_aliased_paths() -> None:
         assert not _is_mounted("/tmp/dislocker-ui-other")  # nosec B108 - fixture path, never created
 
 
+def test_session_looks_stale_returns_false_when_check_raises(tmp_path: Path) -> None:
+    """A failing staleness check degrades to no hint, never an exception."""
+    stored = _stored_session(tmp_path, _session(fuse_mount=str(tmp_path / "dislocker-ui-x")))
+    session = load_session(stored)
+    assert session is not None
+    with patch("dislocker_ui.unmount_steps.session_targets_gone", side_effect=RuntimeError("boom")):
+        assert session_looks_stale(session) is False
+
+
 def test_is_mounted_assumes_mounted_when_table_unavailable() -> None:
     """An unknown table fails toward attempting umount, not toward clearing."""
-    with patch("dislocker_ui.unmount_steps._mounted_paths", return_value=None):
+    with patch("dislocker_ui.unmount_steps._mount_table", return_value=None):
         assert _is_mounted("/Volumes/Anything")
 
 

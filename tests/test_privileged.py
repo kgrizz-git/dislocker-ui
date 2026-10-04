@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import os
 import plistlib
-from collections.abc import Iterator
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from conftest import fake_root_owned
 from dislocker_ui.deps import DepsStatus
 from dislocker_ui.mount_policy import privileged_staging_dir
 from dislocker_ui.privileged import (
@@ -465,41 +464,6 @@ def test_main_unmount_uses_canonical_session(tmp_path: Path) -> None:
     assert unmount.call_args.kwargs["session_path"] == state / "active_session.json"
 
 
-@contextlib.contextmanager
-def _fake_root_owned(path: Path) -> Iterator[None]:
-    """Report *path* as uid-0-owned through os.open/os.fstat (root simulation)."""
-    real_open, real_fstat = os.open, os.fstat
-    owned: set[int] = set()
-
-    def _open(file: object, flags: int, *args: object, **kwargs: object) -> int:
-        fd = real_open(file, flags, *args, **kwargs)  # type: ignore[arg-type]
-        if isinstance(file, str | bytes | os.PathLike) and os.path.abspath(file) == str(path):
-            owned.add(fd)
-        return fd
-
-    def _fstat(fd: int) -> os.stat_result:
-        st = real_fstat(fd)
-        if fd in owned:
-            st = os.stat_result(
-                (
-                    st.st_mode,
-                    st.st_ino,
-                    st.st_dev,
-                    st.st_nlink,
-                    0,
-                    st.st_gid,
-                    st.st_size,
-                    st.st_atime,
-                    st.st_mtime,
-                    st.st_ctime,
-                )
-            )
-        return st
-
-    with patch("os.open", side_effect=_open), patch("os.fstat", side_effect=_fstat):
-        yield
-
-
 def test_main_unmount_clears_stale_elevated_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -556,7 +520,7 @@ def test_main_unmount_clears_stale_elevated_session(
         patch("dislocker_ui.elevate.needs_elevation", return_value=False),
         patch("os.geteuid", return_value=0),
         patch("subprocess.run", side_effect=_fake),
-        _fake_root_owned(session_file),
+        fake_root_owned(session_file),
     ):
         from dislocker_ui.privileged import EXIT_OK, main
 
