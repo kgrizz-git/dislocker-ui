@@ -52,9 +52,10 @@ from dislocker_ui.session import (
     MountSession,
     active_session_path_for_user,
     clear_session,
-    default_session_path,
     legacy_session_present,
+    legacy_session_recovery_message,
     load_session,
+    manual_session_cleanup_hint,
     save_session,
     session_owner_mismatch,
 )
@@ -62,6 +63,7 @@ from dislocker_ui.unmount_steps import (
     HDIUTIL,
     RunnerError,
     _attached_disk_images,
+    _clear_stale_session,
     _detach_raw_disk,
     _expected_image_path,
     _normalized_hdiutil_image_path,
@@ -122,9 +124,9 @@ def mount_volume(
         # Advisory only: a stale-looking session does not block here (and is
         # never cleared — the root child decides authoritatively). A wrong
         # "stale" guess costs one admin prompt at most. This relies on the
-        # unprivileged process being unable to lstat inside the root-0700
-        # staging dir, so elevated sessions validate as invalid → not stale,
-        # keep blocking here, and fall through to Unmount.
+        # explicit lstat gate: an unprivileged lstat inside the root-0700
+        # staging dir fails, so elevated sessions validate as invalid →
+        # not stale, keep blocking here, and fall through to Unmount.
         if existing is not None and not session_targets_gone(
             existing, deps.hdiutil or HDIUTIL, canonical_path
         ):
@@ -134,7 +136,7 @@ def mount_volume(
             )
         # Legacy records deliberately live only in the old user-owned location.
         if legacy_session_present():
-            raise RunnerError(_legacy_session_recovery_message())
+            raise RunnerError(legacy_session_recovery_message())
         # Hold the per-user lock across prepare + osascript so a concurrent
         # elevation cannot sweep this transaction's request/log files.
         with elevation_transaction() as (sess_path, log_path):
@@ -296,10 +298,11 @@ def unmount_volume(
 
     error = session_paths_error(session, canonical_path)
     if error:
-        raise RunnerError(f"{error}. {_manual_session_cleanup_hint(canonical_path)}")
+        raise RunnerError(f"{error}. {manual_session_cleanup_hint(canonical_path)}")
     errors: list[str] = []
-    errors.extend(_unmount_ntfs(deps, session, log))
-    errors.extend(_detach_raw_disk(deps, session, log))
+    images = _attached_disk_images(deps.hdiutil or HDIUTIL)
+    errors.extend(_unmount_ntfs(deps, session, log, images=images))
+    errors.extend(_detach_raw_disk(deps, session, log, session_path=canonical_path, images=images))
     errors.extend(_unmount_fuse(deps, session, log))
     if not errors:
         errors.extend(
@@ -321,30 +324,12 @@ def _missing_session_error(canonical_path: Path | None, require_owner: int | Non
     if require_owner is not None and session_owner_mismatch(canonical_path, require_owner):
         return RunnerError(
             "Session file is not owned by root and cannot be trusted. "
-            + _manual_session_cleanup_hint(canonical_path)
+            + manual_session_cleanup_hint(canonical_path)
         )
     # Probe the old user-owned path, never the trusted canonical state path.
     if legacy_session_present():
-        return RunnerError(_legacy_session_recovery_message())
+        return RunnerError(legacy_session_recovery_message())
     return RunnerError("No active session found to unmount")
-
-
-def _manual_session_cleanup_hint(canonical_path: Path | None) -> str:
-    """Point at the session file the operator must remove by hand."""
-    target = canonical_path or default_session_path()
-    return (
-        "The session was left untouched for safety. Unmount the volume manually, "
-        f"detach its raw disk, then remove {target} before mounting again."
-    )
-
-
-def _legacy_session_recovery_message() -> str:
-    """Explain how to recover safely from untrusted pre-versioned state."""
-    return (
-        "A pre-0.3.0 session record was found and cannot be trusted for automated cleanup. "
-        "Unmount the existing volume manually, detach its raw disk, then remove the old "
-        "dislocker-ui session file before mounting or unmounting again."
-    )
 
 
 def _canonicalize_bek_secret(req: MountRequest) -> MountRequest:
@@ -395,20 +380,24 @@ def _validate_mount_request(
 
     require_owner: int | None = 0 if os.geteuid() == 0 else None
     existing = load_session(session_path, require_owner=require_owner)
-    if existing is not None:
-        # Authoritative: a fully-stale session is cleared instead of blocking.
-        if session_targets_gone(existing, deps.hdiutil or HDIUTIL, session_path):
-            log(f"Stale session for {existing.ntfs_mount} found; clearing it automatically…")
-            clear_session(session_path)
-            # Drop the leftover empty mountpoint dir so the fresh mount does
-            # not shift to a "-2" suffixed path. Anything left inside is only
-            # warned about; errors here never block the new mount.
-            _remove_empty_ntfs_dir(existing.ntfs_mount, log)
-        else:
-            raise RunnerError(
-                "A session is already active. Click Unmount before mounting again.\n"
-                f"NTFS mount: {existing.ntfs_mount}"
-            )
+    if (
+        existing is None
+        and require_owner is not None
+        and session_owner_mismatch(session_path, require_owner)
+    ):
+        # A distrusted file must block mounting, not silently orphan live
+        # mounts behind it: the operator removes it by hand (see hint).
+        raise RunnerError(
+            "Session file is not owned by root and cannot be trusted. "
+            + manual_session_cleanup_hint(session_path)
+        )
+    if existing is not None and not _clear_stale_session(
+        existing, session_path, deps.hdiutil or HDIUTIL, log
+    ):
+        raise RunnerError(
+            "A session is already active. Click Unmount before mounting again.\n"
+            f"NTFS mount: {existing.ntfs_mount}"
+        )
     return volume
 
 

@@ -55,14 +55,24 @@ def allocate_privileged_fuse_path(session_path: Path, uid: int) -> Path:
 
 
 def is_privileged_fuse_path(path: Path, session_path: Path | None) -> bool:
-    """Return whether *path* is a direct, non-symlink staging child."""
+    """Return whether *path* is a direct, non-symlink staging child.
+
+    The leaf is checked with an explicit ``os.lstat`` (rather than
+    ``Path.is_symlink``, whose error behavior varies across Python
+    versions): any ``OSError`` — including EACCES from an unprivileged
+    process looking into the root-0700 staging dir, or ENOENT for a
+    missing entry — means "not ours".
+    """
     if session_path is None:
         return False
     try:
         staging = privileged_staging_dir(session_path, int(session_path.parent.name))
-        return path.parent == staging and path.name.startswith("session-") and not path.is_symlink()
+        if path.parent != staging or not path.name.startswith("session-"):
+            return False
+        info = os.lstat(path)
     except (OSError, ValueError):
         return False
+    return not stat.S_ISLNK(info.st_mode)
 
 
 def remove_empty_privileged_staging_parents(fuse_path: Path, session_path: Path | None) -> None:

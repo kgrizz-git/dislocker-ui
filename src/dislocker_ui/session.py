@@ -184,7 +184,7 @@ def load_session(
         ):
             return None
         return session
-    except (OSError, json.JSONDecodeError, TypeError, KeyError):
+    except (OSError, ValueError, TypeError, KeyError):
         return None
     finally:
         if fd >= 0:
@@ -199,6 +199,24 @@ def session_owner_mismatch(path: Path | None = None, uid: int = 0) -> bool:
         return os.lstat(target).st_uid != uid
     except OSError:
         return False
+
+
+def manual_session_cleanup_hint(canonical_path: Path | None) -> str:
+    """Point at the session file the operator must remove by hand."""
+    target = canonical_path or default_session_path()
+    return (
+        "The session was left untouched for safety. Unmount the volume manually, "
+        f"detach its raw disk, then remove {target} before mounting again."
+    )
+
+
+def legacy_session_recovery_message() -> str:
+    """Explain how to recover safely from untrusted pre-versioned state."""
+    return (
+        "A pre-0.3.0 session record was found and cannot be trusted for automated cleanup. "
+        "Unmount the existing volume manually, detach its raw disk, then remove the old "
+        "dislocker-ui session file before mounting or unmounting again."
+    )
 
 
 def legacy_session_present(path: Path | None = None) -> bool:

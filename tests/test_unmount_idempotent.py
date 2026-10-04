@@ -28,7 +28,7 @@ import pytest
 from dislocker_ui.deps import DepsStatus
 from dislocker_ui.runner import RunnerError, unmount_volume
 from dislocker_ui.session import MountSession, load_session, save_session
-from dislocker_ui.unmount_steps import _is_mounted, _mounted_paths, session_looks_stale
+from dislocker_ui.unmount_steps import _is_mounted, _mount_table, session_looks_stale
 
 _NTFS_MOUNT = "/Volumes/DislockerUI-stale-probe"
 _UMOUNT = "/bin/umount"
@@ -87,11 +87,18 @@ def _unmount_session_file(session_path: Path, logs: list[str]) -> None:
 
 
 def _mount_responder(
-    *, table: str = "", mount_rc: int = 0, other_rc: int = 0, other_err: str = ""
+    *,
+    table: str = "",
+    mount_rc: int = 0,
+    other_rc: int = 0,
+    other_err: str = "",
+    info_images: list | None = None,
 ) -> MagicMock:
-    """Serve a fake /sbin/mount table and an empty hdiutil image list."""
+    """Serve a fake /sbin/mount table and hdiutil image list (empty by default)."""
     mount_result = MagicMock(returncode=mount_rc, stdout=table, stderr="")
-    info_result = MagicMock(returncode=0, stdout=plistlib.dumps({"images": []}), stderr=b"")
+    info_result = MagicMock(
+        returncode=0, stdout=plistlib.dumps({"images": info_images or []}), stderr=b""
+    )
     other_result = MagicMock(returncode=other_rc, stdout="", stderr=other_err)
 
     def _fake(cmd: list[str], **kwargs: object) -> MagicMock:
@@ -104,8 +111,13 @@ def _mount_responder(
     return MagicMock(side_effect=_fake)
 
 
-def test_mounted_paths_parses_mount_table() -> None:
-    """Mount-table lines yield their mountpoints; malformed lines are skipped."""
+def _image_entry(image_path: str, *devs: str) -> dict:
+    """Build one hdiutil info -plist image entry."""
+    return {"image-path": image_path, "system-entities": [{"dev-entry": d} for d in devs]}
+
+
+def test_mount_table_parses_mount_table() -> None:
+    """Mount-table lines yield mountpoint→device; malformed lines are skipped."""
     table = (
         "/dev/disk1s1 on / (apfs, local, journaled)\n"
         "devfs on /dev (devfs, local, nobrowse)\n"
@@ -114,18 +126,22 @@ def test_mounted_paths_parses_mount_table() -> None:
         "/dev/disk9 on /weird-but-no-parens\n"
     )
     with patch("subprocess.run", return_value=MagicMock(returncode=0, stdout=table, stderr="")):
-        assert _mounted_paths() == {"/", "/dev", "/Volumes/My Passport"}
+        assert _mount_table() == {
+            "/": "/dev/disk1s1",
+            "/dev": "devfs",
+            "/Volumes/My Passport": "/dev/disk9",
+        }
 
 
-def test_mounted_paths_returns_none_when_listing_fails() -> None:
+def test_mount_table_returns_none_when_listing_fails() -> None:
     """A failed, hung, or unrunnable /sbin/mount reports an unknown table."""
     with patch("subprocess.run", return_value=MagicMock(returncode=1, stdout="", stderr="x")):
-        assert _mounted_paths() is None
+        assert _mount_table() is None
     with patch("subprocess.run", side_effect=OSError("no mount")):
-        assert _mounted_paths() is None
+        assert _mount_table() is None
     expired = subprocess.TimeoutExpired(["/sbin/mount"], 10)
     with patch("subprocess.run", side_effect=expired) as run:
-        assert _mounted_paths() is None
+        assert _mount_table() is None
     assert run.call_args.kwargs["timeout"] == 10
 
 
@@ -218,7 +234,8 @@ def test_unmount_live_failure_retains_session(tmp_path: Path) -> None:
         session = _session(fuse_mount=str(fuse))
         stored = _stored_session(tmp_path, session)
         table = f"/dev/disk9 on {session.ntfs_mount} (ntfs, local, noowners)\n"
-        run = _mount_responder(table=table, other_rc=1, other_err="busy")
+        ours = [_image_entry(str(fuse / "dislocker-file"), "/dev/disk9")]
+        run = _mount_responder(table=table, other_rc=1, other_err="busy", info_images=ours)
         with (
             patch("dislocker_ui.unmount_steps.subprocess.run", run),
             pytest.raises(RunnerError, match="retained"),
@@ -259,6 +276,64 @@ def test_unmount_refuses_reassigned_ntfs_device(tmp_path: Path) -> None:
     assert [c for c in run.call_args_list if c.args[0][0] == _UMOUNT] == []
 
 
+def test_unmount_refuses_crafted_raw_matching_foreign_disk(tmp_path: Path) -> None:
+    """A raw_disk copied from a foreign mount does not authorize umount."""
+    with _fuse_dir() as fuse:
+        session = _session(fuse_mount=str(fuse), raw_disk="/dev/disk5")
+        stored = _stored_session(tmp_path, session)
+        table = f"/dev/disk5 on {session.ntfs_mount} (apfs, local, journaled)\n"
+        ours = [_image_entry(str(fuse / "dislocker-file"), "/dev/disk9")]
+        run = _mount_responder(table=table, info_images=ours)
+        with (
+            patch("dislocker_ui.unmount_steps.subprocess.run", run),
+            pytest.raises(RunnerError, match="different disk") as excinfo,
+        ):
+            _unmount_session_file(stored, [])
+    assert stored.exists()
+    assert "left untouched" in str(excinfo.value)
+    assert [c for c in run.call_args_list if c.args[0][0] == _UMOUNT] == []
+
+
+def test_unmount_allows_other_slice_of_own_image(tmp_path: Path) -> None:
+    """A partition-node recording still unmounts another slice of our image."""
+    with _fuse_dir() as fuse:
+        session = _session(fuse_mount=str(fuse), raw_disk="/dev/disk9s2")
+        stored = _stored_session(tmp_path, session)
+        table = f"/dev/disk9s1 on {session.ntfs_mount} (msdos, local, noowners)\n"
+        ours = [_image_entry(str(fuse / "dislocker-file"), "/dev/disk9", "/dev/disk9s2")]
+        run = _mount_responder(table=table, info_images=ours)
+        with patch("dislocker_ui.unmount_steps.subprocess.run", run):
+            _unmount_session_file(stored, [])
+    assert not stored.exists()
+    assert [_UMOUNT, session.ntfs_mount] in [c.args[0] for c in run.call_args_list]
+
+
+def test_unmount_run_timeout_retains_session(tmp_path: Path) -> None:
+    """A hung umount helper retains state for retry instead of hanging."""
+    with _fuse_dir() as fuse:
+        session = _session(fuse_mount=str(fuse))
+        stored = _stored_session(tmp_path, session)
+        table = f"/dev/disk9 on {session.ntfs_mount} (ntfs, local, noowners)\n"
+        mount_result = MagicMock(returncode=0, stdout=table, stderr="")
+        ours = [_image_entry(str(fuse / "dislocker-file"), "/dev/disk9")]
+        info_result = MagicMock(returncode=0, stdout=plistlib.dumps({"images": ours}), stderr=b"")
+
+        def _fake(cmd: list[str], **kwargs: object) -> MagicMock:
+            if cmd[:1] == ["/sbin/mount"]:
+                return mount_result
+            if cmd[1:3] == ["info", "-plist"]:
+                return info_result
+            raise subprocess.TimeoutExpired(cmd, 120)
+
+        run = MagicMock(side_effect=_fake)
+        with (
+            patch("dislocker_ui.unmount_steps.subprocess.run", run),
+            pytest.raises(RunnerError, match="timed out"),
+        ):
+            _unmount_session_file(stored, [])
+    assert stored.exists()
+
+
 def test_unmount_allows_own_partition_and_fuse_devices(tmp_path: Path) -> None:
     """The recorded disk, its partitions, and FUSE devices still unmount."""
     cases = [
@@ -271,7 +346,8 @@ def test_unmount_allows_own_partition_and_fuse_devices(tmp_path: Path) -> None:
             session = _session(fuse_mount=str(fuse))
             stored = _stored_session(tmp_path, session)
             table = f"{device} on {session.ntfs_mount} (msdos, local, noowners)\n"
-            run = _mount_responder(table=table)
+            ours = [_image_entry(str(fuse / "dislocker-file"), "/dev/disk9")]
+            run = _mount_responder(table=table, info_images=ours)
             with patch("dislocker_ui.unmount_steps.subprocess.run", run):
                 _unmount_session_file(stored, [])
         assert not stored.exists(), device
@@ -314,7 +390,8 @@ def test_unmount_mounted_nonempty_dir_retains_session(
         session = _session(fuse_mount=str(fuse), ntfs_mount=str(ntfs))
         stored = _stored_session(tmp_path, session)
         table = f"/dev/disk9 on {ntfs} (msdos, local, noowners)\n/dev/disk9 on {fuse} (exfat)\n"
-        run = _mount_responder(table=table)
+        ours = [_image_entry(str(fuse / "dislocker-file"), "/dev/disk9")]
+        run = _mount_responder(table=table, info_images=ours)
         with (
             patch("dislocker_ui.unmount_steps.subprocess.run", run),
             pytest.raises(RunnerError, match="not empty"),

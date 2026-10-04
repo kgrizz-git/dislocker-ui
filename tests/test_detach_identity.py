@@ -26,7 +26,7 @@ import pytest
 from dislocker_ui.deps import DepsStatus
 from dislocker_ui.runner import RunnerError, _best_effort_cleanup, unmount_volume
 from dislocker_ui.session import MountSession, save_session
-from dislocker_ui.unmount_steps import _attached_disk_images, _image_identity_ok
+from dislocker_ui.unmount_steps import _attached_disk_images, _find_session_image, _whole_disk_id
 
 _HDIUTIL = "/bin/hdiutil"
 _NTFS_MOUNT = "/Volumes/DislockerUI-stale-probe"
@@ -167,17 +167,23 @@ def test_attached_disk_images_returns_none_on_failure() -> None:
         assert _attached_disk_images(_HDIUTIL) is None
 
 
-def test_image_identity_ok_matches_own_image_only() -> None:
-    """Identity holds for the session image, nothing else."""
+def test_find_session_image_matches_whole_disk_only() -> None:
+    """Identity finds the whole-disk device by image path, ignoring raw_disk."""
     session = _session(fuse_mount="/tmp/dislocker-ui-x")  # nosec B108 - fixture path, never created
-    images = {"/dev/disk9": "/tmp/dislocker-ui-x/dislocker-file"}  # nosec B108 - fixture path, never created
-    assert _image_identity_ok(images, "/dev/disk9", session)
-    assert not _image_identity_ok(images, "/dev/disk5", session)
-    assert not _image_identity_ok(
-        {"/dev/disk9": "/tmp/other/dislocker-file"},  # nosec B108 - fixture path, never created
-        "/dev/disk9",
-        session,
-    )
+    images = {
+        "/dev/disk7": "/tmp/dislocker-ui-x/dislocker-file",  # nosec B108 - fixture path, never created
+        "/dev/disk7s1": "/tmp/dislocker-ui-x/dislocker-file",  # nosec B108 - fixture path, never created
+    }
+    assert _find_session_image(images, session) == "/dev/disk7"
+    assert _find_session_image({"/dev/disk7s1": images["/dev/disk7s1"]}, session) is None
+    assert _find_session_image({"/dev/disk5": "/tmp/other/dislocker-file"}, session) is None  # nosec B108 - fixture path, never created
+
+
+def test_whole_disk_id_strips_partitions() -> None:
+    """Whole-disk ids mirror fs_probe's diskN extraction."""
+    assert _whole_disk_id("/dev/disk9") == "disk9"
+    assert _whole_disk_id("/dev/disk9s2") == "disk9"
+    assert _whole_disk_id("fuse-device") is None
 
 
 def test_detach_skips_absent_device(tmp_path: Path) -> None:
@@ -279,7 +285,7 @@ def test_detach_does_not_decode_session_percent(tmp_path: Path) -> None:
 
 
 def test_detach_matches_partition_node(tmp_path: Path) -> None:
-    """A /dev/diskNsM session node is found among the mapped entities."""
+    """A /dev/diskNsM session node detaches via its whole disk."""
     with _fuse_dir() as fuse:
         stored = _stored_session(tmp_path, _session(fuse_mount=str(fuse), raw_disk="/dev/disk9s2"))
         entry = _image_entry(str(fuse / "dislocker-file"), "/dev/disk9", "/dev/disk9s2")
@@ -287,7 +293,21 @@ def test_detach_matches_partition_node(tmp_path: Path) -> None:
         with patch("dislocker_ui.unmount_steps.subprocess.run", run):
             _unmount_session_file(stored, [])
     assert not stored.exists()
-    assert _detach_calls(run) == [[_HDIUTIL, "detach", "/dev/disk9s2"]]
+    assert _detach_calls(run) == [[_HDIUTIL, "detach", "/dev/disk9"]]
+
+
+def test_detach_follows_renumbered_image(tmp_path: Path) -> None:
+    """Our image at a new device detaches there, not at the recorded one."""
+    with _fuse_dir() as fuse:
+        stored = _stored_session(tmp_path, _session(fuse_mount=str(fuse), raw_disk="/dev/disk5"))
+        logs: list[str] = []
+        entry = _image_entry(str(fuse / "dislocker-file"), "/dev/disk7")
+        run = _detach_responder(info_images=[entry])
+        with patch("dislocker_ui.unmount_steps.subprocess.run", run):
+            _unmount_session_file(stored, logs)
+    assert not stored.exists()
+    assert _detach_calls(run) == [[_HDIUTIL, "detach", "/dev/disk7"]]
+    assert any("renumbered from /dev/disk5 to /dev/disk7" in line for line in logs)
 
 
 def test_detach_errors_when_info_unavailable(tmp_path: Path) -> None:

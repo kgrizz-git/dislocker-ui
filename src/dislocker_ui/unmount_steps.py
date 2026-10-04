@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import os
 import plistlib
+import re
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -39,9 +40,11 @@ from dislocker_ui.mount_policy import (
     remove_empty_privileged_staging_parents,
     session_paths_error,
 )
-from dislocker_ui.session import MountSession
+from dislocker_ui.session import MountSession, clear_session, manual_session_cleanup_hint
 
 HDIUTIL = "/usr/bin/hdiutil"
+_WHOLE_DISK_RE = re.compile(r"/dev/(disk\d+)(?:s\d+)?")
+_WHOLE_DISK_DEV_RE = re.compile(r"/dev/disk\d+")
 
 LogFn = Callable[[str], None]
 
@@ -58,7 +61,10 @@ def _run(
     """Run a subprocess, log argv, optionally raise RunnerError on failure."""
     log(" ".join(cmd))
     # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit -- argv list, no shell; executables come from trusted deps
-    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise RunnerError(f"Command timed out after 120 seconds: {cmd[0]}") from None
     if proc.stdout.strip():
         log(proc.stdout.strip())
     if proc.returncode != 0:
@@ -114,12 +120,6 @@ def _mount_table() -> dict[str, str] | None:
     return table
 
 
-def _mounted_paths() -> set[str] | None:
-    """Return the mounted paths; None when the table is unavailable."""
-    table = _mount_table()
-    return set(table) if table is not None else None
-
-
 def _is_mounted(path: str) -> bool:
     """Return whether *path* appears in the mount table.
 
@@ -144,24 +144,37 @@ def _is_mounted_in(table: dict[str, str] | None, path: str) -> bool:
     return aliased in table
 
 
-def _unmount_ntfs(deps: DepsStatus, session: MountSession, log: LogFn) -> list[str]:
+def _unmount_ntfs(
+    deps: DepsStatus,
+    session: MountSession,
+    log: LogFn,
+    *,
+    images: dict[str, str] | None = None,
+    session_path: Path | None = None,
+) -> list[str]:
     """Unmount the decrypted volume mountpoint, forcing via diskutil if needed."""
     table = _mount_table()
     if not _is_mounted_in(table, session.ntfs_mount):
         log(f"already unmounted: {session.ntfs_mount}")
         return []
     # A reassigned /Volumes mountpoint may now belong to another disk;
-    # unmounting it would yank someone else's volume (non-/dev devices from
-    # ntfs-3g/macFUSE carry no device number and keep the old behavior).
+    # unmounting it would yank someone else's volume. The mounted device
+    # must resolve to the same whole disk as our own attached image, found
+    # by identity (not by trusting the recorded device number, which may be
+    # reassigned or crafted). Non-/dev devices from ntfs-3g/macFUSE carry
+    # no device number and keep the old behavior, as does an unreadable
+    # image list.
+    if images is None:
+        images = _attached_disk_images(deps.hdiutil or HDIUTIL)
     device = (table or {}).get(session.ntfs_mount)
-    if (
-        device is not None
-        and device.startswith("/dev/disk")
-        and device != session.raw_disk
-        and not device.startswith(session.raw_disk + "s")
-    ):
-        log(f"{session.ntfs_mount} is now a different disk ({device}); not unmounting")
-        return [f"NTFS mountpoint {session.ntfs_mount} is now a different disk ({device})"]
+    if device is not None and device.startswith("/dev/disk") and images is not None:
+        owned = _find_session_image(images, session)
+        if owned is None or _whole_disk_id(device) != _whole_disk_id(owned):
+            log(f"{session.ntfs_mount} is now a different disk ({device}); not unmounting")
+            return [
+                f"NTFS mountpoint {session.ntfs_mount} is now a different disk ({device}); "
+                "not unmounting. " + manual_session_cleanup_hint(session_path)
+            ]
     log(f"Unmounting volume at {session.ntfs_mount}…")
     return _run_with_fallback(
         [deps.umount, session.ntfs_mount],
@@ -228,13 +241,27 @@ def _normalized_hdiutil_image_path(image_path: str) -> str:
     return os.path.join(os.path.realpath(path.parent.parent), path.parent.name, path.name)
 
 
-def _image_identity_ok(images: dict[str, str], raw_disk: str, session: MountSession) -> bool:
-    """Return whether *raw_disk* is attached as this session's own image."""
-    actual = images.get(raw_disk)
-    if actual is None:
-        return False
+def _whole_disk_id(device: str) -> str | None:
+    """Extract ``diskN`` from a ``/dev/diskN`` or ``/dev/diskNsM`` path."""
+    match = _WHOLE_DISK_RE.fullmatch(device)
+    return match.group(1) if match else None
+
+
+def _find_session_image(images: dict[str, str], session: MountSession) -> str | None:
+    """Return the whole-disk device attached as this session's own image.
+
+    Matches on the normalized image path, not on the recorded device
+    number, so a renumbered attach (sleep/wake, reattach) is still found.
+    Returns None when our image is not attached.
+    """
     expected = _expected_image_path(session.fuse_mount, session.dislocker_file)
-    return _normalized_hdiutil_image_path(actual) == expected
+    for dev, image_path in images.items():
+        if (
+            _WHOLE_DISK_DEV_RE.fullmatch(dev)
+            and _normalized_hdiutil_image_path(image_path) == expected
+        ):
+            return dev
+    return None
 
 
 def session_targets_gone(
@@ -244,9 +271,10 @@ def session_targets_gone(
 
     All three checks must agree: the session passes path validation (the
     root child supplies its canonical session path here), both mounts are
-    absent from a successfully read mount table, and the raw disk is not
-    attached as our image per a successfully read image list. Unknown
-    table/list state, or a session failing validation, is never stale.
+    absent from a successfully read mount table, and our image is attached
+    nowhere per a successfully read image list (a renumbered attach still
+    counts as live). Unknown table/list state, or a session failing
+    validation, is never stale.
     """
     if session_paths_error(session, session_path) is not None:
         return False
@@ -256,7 +284,7 @@ def session_targets_gone(
     images = _attached_disk_images(hdiutil)
     if images is None:
         return False
-    return not _image_identity_ok(images, session.raw_disk, session)
+    return _find_session_image(images, session) is None
 
 
 def session_looks_stale(session: MountSession, session_path: Path | None = None) -> bool:
@@ -267,22 +295,62 @@ def session_looks_stale(session: MountSession, session_path: Path | None = None)
         return False
 
 
-def _detach_raw_disk(deps: DepsStatus, session: MountSession, log: LogFn) -> list[str]:
-    """Detach the hdiutil raw disk, but only after verifying its identity.
+def _clear_stale_session(
+    session: MountSession, session_path: Path | None, hdiutil: str, log: LogFn
+) -> bool:
+    """Clear a fully-stale session and its dead staging dirs; True if cleared."""
+    if not session_targets_gone(session, hdiutil, session_path):
+        return False
+    log(f"Stale session for {session.ntfs_mount} found; clearing it automatically…")
+    clear_session(session_path)
+    # Drop the leftover empty mountpoint dir so the fresh mount does not
+    # shift to a "-2" suffixed path. Anything left inside is only warned
+    # about; errors here never block the new mount.
+    _remove_empty_ntfs_dir(session.ntfs_mount, log)
+    # Drop the dead FUSE staging dir the same way (validated paths only);
+    # failures are logged, never raised.
+    try:
+        for stale_error in _remove_fuse_dir(
+            session.fuse_mount, elevated=session.elevated, session_path=session_path
+        ):
+            log(stale_error)
+    except RunnerError as exc:
+        log(str(exc))
+    return True
+
+
+def _detach_raw_disk(
+    deps: DepsStatus,
+    session: MountSession,
+    log: LogFn,
+    *,
+    images: dict[str, str] | None = None,
+    session_path: Path | None = None,
+) -> list[str]:
+    """Detach our disk image, but only after verifying its identity.
 
     A device number recorded before a reboot may now belong to an unrelated
-    disk; detaching it blind would eject someone else's drive.
+    disk; the attached device is found by image identity instead, so a
+    renumbered attach detaches the right disk and a reassigned number is
+    never touched.
     """
-    images = _attached_disk_images(deps.hdiutil or HDIUTIL)
     if images is None:
-        return [f"Could not verify {session.raw_disk} is still our disk image; not detaching"]
-    if not _image_identity_ok(images, session.raw_disk, session):
+        images = _attached_disk_images(deps.hdiutil or HDIUTIL)
+    if images is None:
+        return [
+            f"Could not verify {session.raw_disk} is still our disk image; not detaching. "
+            + manual_session_cleanup_hint(session_path)
+        ]
+    found = _find_session_image(images, session)
+    if found is None:
         log(f"raw disk {session.raw_disk} no longer attached as our image; skipping detach")
         return []
-    log(f"Detaching {session.raw_disk}…")
+    if found != session.raw_disk:
+        log(f"image renumbered from {session.raw_disk} to {found}")
+    log(f"Detaching {found}…")
     return _run_with_fallback(
-        [deps.hdiutil, "detach", session.raw_disk],
-        [deps.hdiutil, "detach", "-force", session.raw_disk],
+        [deps.hdiutil, "detach", found],
+        [deps.hdiutil, "detach", "-force", found],
         log,
     )
 

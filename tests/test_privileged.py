@@ -475,6 +475,7 @@ def test_main_unmount_clears_stale_elevated_session(
     state.mkdir()
     session_file = state / "active_session.json"
     fuse = privileged_staging_dir(session_file, 501) / "session-test"
+    fuse.mkdir(parents=True)  # is_privileged_fuse_path lstats the entry
     volumes = tmp_path / "Volumes"
     volumes.mkdir()
     monkeypatch.setattr("dislocker_ui.mount_policy.VOLUMES_ROOT", volumes)

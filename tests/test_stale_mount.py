@@ -13,7 +13,9 @@ Requirements:
 from __future__ import annotations
 
 import contextlib
+import os
 import plistlib
+import shutil
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -54,9 +56,14 @@ def _req(volume: str) -> MountRequest:
     )
 
 
-def _stale_session(*, raw_disk: str = "/dev/disk9", ntfs_mount: str = _NTFS_MOUNT) -> MountSession:
+def _stale_session(
+    *,
+    raw_disk: str = "/dev/disk9",
+    ntfs_mount: str = _NTFS_MOUNT,
+    fuse_mount: str | None = None,
+) -> MountSession:
     """Build a validation-passing session whose targets are gone."""
-    fuse_mount = str(Path(tempfile.gettempdir()) / "dislocker-ui-gone")
+    fuse_mount = fuse_mount or str(Path(tempfile.gettempdir()) / "dislocker-ui-gone")
     return MountSession(
         volume="/dev/disk2s1",
         fuse_mount=fuse_mount,
@@ -152,6 +159,7 @@ def test_validate_mount_request_clears_stale_elevated_session(
     monkeypatch.setattr("dislocker_ui.mount_policy.VOLUMES_ROOT", volumes)
     session_path = tmp_path / "501" / "active_session.json"
     fuse = privileged_staging_dir(session_path, 501) / "session-test"
+    fuse.mkdir(parents=True)  # is_privileged_fuse_path lstats the entry
     session = MountSession(
         volume="/dev/disk2s1",
         fuse_mount=str(fuse),
@@ -197,6 +205,60 @@ def test_validate_mount_request_clears_empty_ntfs_dir(
     assert not ntfs.exists()
 
 
+def test_validate_mount_request_clears_dead_fuse_dir(tmp_path: Path) -> None:
+    """Self-heal removes the leftover FUSE staging dir alongside the session."""
+    fuse = Path(tempfile.mkdtemp(prefix="dislocker-ui-"))
+    try:
+        stored = _stored_session(tmp_path, _stale_session(fuse_mount=str(fuse)))
+        run = _stale_responder()
+        with (
+            _volume(tmp_path) as volume,
+            patch("dislocker_ui.unmount_steps.subprocess.run", run),
+        ):
+            _validate_mount_request(_req(volume), _deps(), lambda _m: None, session_path=stored)
+        assert not stored.exists()
+        assert not fuse.exists()
+    finally:
+        shutil.rmtree(fuse, ignore_errors=True)
+
+
+def test_validate_mount_request_blocks_renumbered_image(tmp_path: Path) -> None:
+    """An image attached under a new device number still blocks mounting."""
+    fuse = Path(tempfile.mkdtemp(prefix="dislocker-ui-"))
+    try:
+        stored = _stored_session(
+            tmp_path, _stale_session(fuse_mount=str(fuse), raw_disk="/dev/disk5")
+        )
+        entry = {
+            "image-path": str(fuse / "dislocker-file"),
+            "system-entities": [{"dev-entry": "/dev/disk7"}],
+        }
+        run = _stale_responder(info_images=[entry])
+        with (
+            _volume(tmp_path) as volume,
+            patch("dislocker_ui.unmount_steps.subprocess.run", run),
+            pytest.raises(RunnerError, match="already active"),
+        ):
+            _validate_mount_request(_req(volume), _deps(), lambda _m: None, session_path=stored)
+        assert stored.exists()
+    finally:
+        shutil.rmtree(fuse, ignore_errors=True)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="needs a non-root file owner")
+def test_validate_mount_request_rejects_foreign_owned_file(tmp_path: Path) -> None:
+    """Root never mounts over a session file owned by someone else."""
+    stored = _stored_session(tmp_path, _stale_session())
+    with (
+        _volume(tmp_path) as volume,
+        patch("os.geteuid", return_value=0),
+        pytest.raises(RunnerError, match="not owned by root") as excinfo,
+    ):
+        _validate_mount_request(_req(volume), _deps(), lambda _m: None, session_path=stored)
+    assert "left untouched" in str(excinfo.value)
+    assert stored.exists()
+
+
 def test_validate_mount_request_blocks_live_session(tmp_path: Path) -> None:
     """A session with mounted targets still blocks mounting."""
     session = _stale_session()
@@ -218,7 +280,7 @@ def test_validate_mount_request_blocks_when_state_unknown(tmp_path: Path) -> Non
     with _volume(tmp_path) as volume:
         req = _req(volume)
         with (
-            patch("dislocker_ui.unmount_steps._mounted_paths", return_value=None),
+            patch("dislocker_ui.unmount_steps._mount_table", return_value=None),
             pytest.raises(RunnerError, match="already active"),
         ):
             _validate_mount_request(req, deps, _ignore_log, session_path=stored)

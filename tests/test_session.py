@@ -63,6 +63,13 @@ def test_load_invalid_json_returns_none(tmp_path: Path) -> None:
     assert load_session(path) is None
 
 
+def test_load_non_utf8_returns_none(tmp_path: Path) -> None:
+    """Undecodable session files yield None instead of raising."""
+    path = tmp_path / "bad.json"
+    path.write_bytes(b"\xff\xfe\x00not-utf8")
+    assert load_session(path) is None
+
+
 def test_load_incomplete_object_returns_none(tmp_path: Path) -> None:
     """JSON objects missing required fields yield None."""
     path = tmp_path / "partial.json"
