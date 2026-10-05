@@ -28,6 +28,7 @@ BitLocker cryptography and should not vendor dislocker sources.
 | `fat_mount.py` | mount_msdos / mount_exfat for BitLocker To Go |
 | `session.py` | Persist last mount session for clean unmount |
 | `runner.py` | Mount/unmount facade (elevate or in-process) |
+| `unmount_steps.py` | Unmount step functions (umount / detach / rmdir) + shared subprocess helpers |
 | `elevate.py` | osascript admin prompt + request file protocol |
 | `privileged.py` | Root child: validate request, run pipeline |
 | `ntfs_mount.py` | ntfs-3g options / ownership helpers |

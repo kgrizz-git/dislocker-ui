@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -78,6 +79,22 @@ def test_privileged_fuse_path_requires_direct_non_symlink_child(tmp_path: Path) 
     assert is_privileged_fuse_path(fuse_path, session_path)
     assert not is_privileged_fuse_path(staging / "other", session_path)
     assert not is_privileged_fuse_path(fuse_path, None)
+
+
+def test_privileged_fuse_path_missing_entry_still_ours(tmp_path: Path) -> None:
+    """A staging entry already removed by a partial cleanup stays valid."""
+    session_path = tmp_path / "501" / "active_session.json"
+    staging = privileged_staging_dir(session_path, 501)
+    staging.mkdir(parents=True)
+    assert is_privileged_fuse_path(staging / "session-gone", session_path)
+
+
+def test_privileged_fuse_path_unreadable_staging_not_ours(tmp_path: Path) -> None:
+    """An lstat error other than ENOENT (e.g. EACCES) means not ours."""
+    session_path = tmp_path / "501" / "active_session.json"
+    staging = privileged_staging_dir(session_path, 501)
+    with patch("dislocker_ui.mount_policy.os.lstat", side_effect=PermissionError):
+        assert not is_privileged_fuse_path(staging / "session-x", session_path)
 
 
 def test_elevated_session_error_accepts_only_derived_safe_paths(

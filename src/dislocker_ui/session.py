@@ -138,14 +138,29 @@ def save_session(
         raise
 
 
-def load_session(path: Path | None = None) -> MountSession | None:
-    """Load a strictly shaped session, or return ``None`` when unavailable."""
+def load_session(
+    path: Path | None = None, *, require_owner: int | None = None
+) -> MountSession | None:
+    """Load a strictly shaped session, or return ``None`` when unavailable.
+
+    When *require_owner* is set, files not owned by that uid are rejected.
+    """
     target = path or default_session_path()
     try:
-        info = os.lstat(target)
-        if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode):
+        fd = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        return None
+    try:
+        # Regular-file and ownership checks run on the open descriptor, so a
+        # same-user swap between check and read cannot redirect the load.
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
             return None
-        raw = json.loads(target.read_text(encoding="utf-8"))
+        if require_owner is not None and info.st_uid != require_owner:
+            return None
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            fd = -1
+            raw = json.load(handle)
         expected = set(MountSession.__dataclass_fields__)
         if not isinstance(raw, dict) or set(raw) != expected:
             return None
@@ -169,8 +184,39 @@ def load_session(path: Path | None = None) -> MountSession | None:
         ):
             return None
         return session
-    except (OSError, json.JSONDecodeError, TypeError, KeyError):
+    except (OSError, ValueError, TypeError, KeyError):
         return None
+    finally:
+        if fd >= 0:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+
+
+def session_owner_mismatch(path: Path | None = None, uid: int = 0) -> bool:
+    """True when a session file exists but is not owned by *uid*."""
+    target = path or default_session_path()
+    try:
+        return os.lstat(target).st_uid != uid
+    except OSError:
+        return False
+
+
+def manual_session_cleanup_hint(canonical_path: Path | None) -> str:
+    """Point at the session file the operator must remove by hand."""
+    target = canonical_path or default_session_path()
+    return (
+        "The session was left untouched for safety. Unmount the volume manually, "
+        f"detach its raw disk, then remove {target} before mounting again."
+    )
+
+
+def legacy_session_recovery_message() -> str:
+    """Explain how to recover safely from untrusted pre-versioned state."""
+    return (
+        "A pre-0.3.0 session record was found and cannot be trusted for automated cleanup. "
+        "Unmount the existing volume manually, detach its raw disk, then remove the old "
+        "dislocker-ui session file before mounting or unmounting again."
+    )
 
 
 def legacy_session_present(path: Path | None = None) -> bool:

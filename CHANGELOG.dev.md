@@ -6,6 +6,24 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.5.3] - 2026-10-03
+
+### Changed
+
+- Split the unmount step functions out of `runner.py` into a new
+  `unmount_steps.py` module (`runner.py` is back under the 600-line soft
+  cap); `RunnerError` and the shared subprocess helpers moved with them.
+- Unmount/mount tests now exercise the real step functions at the
+  `subprocess` boundary instead of mocking the steps themselves:
+  `tests/test_session_validation.py`,
+  `tests/test_unmount_idempotent.py`, `tests/test_detach_identity.py`,
+  `tests/test_stale_mount.py`, and `tests/test_gui_stale_status.py`.
+- `_run_with_fallback` returns no error when the fallback succeeds (the
+  primary error stays in the log); both failures still return both errors.
+- `/sbin/mount` and `hdiutil info` subprocess calls are bounded by a
+  10-second timeout (unknown state on expiry), so GUI status reads cannot
+  hang on a wedged helper.
+
 ## [0.5.2] - 2026-09-15
 
 ### Fixed

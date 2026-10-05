@@ -12,6 +12,7 @@ Requirements:
 from __future__ import annotations
 
 import contextlib
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -153,10 +154,11 @@ def test_unmount_rejects_legacy_session_with_recovery_guidance() -> None:
 def test_unmount_uses_canonical_path_for_all_cleanup_state() -> None:
     """A Darwin unmount cleans the same canonical state file it loaded."""
     canonical = Path("/var/db/dislocker-ui/501/active_session.json")
+    fuse_mount = str(Path(tempfile.gettempdir()) / "dislocker-ui-test")
     session = MountSession(
         volume="/dev/disk2s1",
-        fuse_mount="/tmp/fuse",
-        dislocker_file="/tmp/fuse/dislocker-file",
+        fuse_mount=fuse_mount,
+        dislocker_file=fuse_mount + "/dislocker-file",
         raw_disk="/dev/disk9",
         ntfs_mount="/Volumes/X",
         readonly=True,

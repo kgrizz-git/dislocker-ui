@@ -43,10 +43,8 @@ from dislocker_ui.mount_policy import (
     VOLUMES_ROOT,
     allocate_privileged_fuse_path,
     elevated_request_error,
-    elevated_session_error,
-    is_privileged_fuse_path,
     is_safe_volume_label,
-    remove_empty_privileged_staging_parents,
+    session_paths_error,
 )
 from dislocker_ui.ntfs_mount import assert_mount_owner as _assert_mount_owner
 from dislocker_ui.ntfs_mount import mount_ntfs as _mount_ntfs
@@ -55,9 +53,27 @@ from dislocker_ui.session import (
     active_session_path_for_user,
     clear_session,
     legacy_session_present,
+    legacy_session_recovery_message,
     load_session,
+    manual_session_cleanup_hint,
     save_session,
+    session_owner_mismatch,
 )
+from dislocker_ui.unmount_steps import (
+    HDIUTIL,
+    RunnerError,
+    _attached_disk_images,
+    _clear_stale_session,
+    _detach_raw_disk,
+    _expected_image_path,
+    _normalized_hdiutil_image_path,
+    _remove_empty_ntfs_dir,
+    _remove_fuse_dir,
+    _unmount_fuse,
+    _unmount_ntfs,
+    session_targets_gone,
+)
+from dislocker_ui.unmount_steps import _run as _run
 
 LogFn = Callable[[str], None]
 
@@ -79,10 +95,6 @@ class MountRequest:
     secret: str
     readonly: bool
     volume_label: str = "DislockerUI"
-
-
-class RunnerError(RuntimeError):
-    """Raised when a mount/unmount step fails."""
 
 
 def mount_volume(
@@ -109,14 +121,22 @@ def mount_volume(
         # credentials — the child would reject it anyway (exit 3).
         canonical_path = session_path or active_session_path_for_user()
         existing = load_session(canonical_path)
-        if existing is not None:
+        # Advisory only: a stale-looking session does not block here (and is
+        # never cleared — the root child decides authoritatively). A wrong
+        # "stale" guess costs one admin prompt at most. This relies on the
+        # explicit lstat gate: an unprivileged lstat inside the root-0700
+        # staging dir fails, so elevated sessions validate as invalid →
+        # not stale, keep blocking here, and fall through to Unmount.
+        if existing is not None and not session_targets_gone(
+            existing, deps.hdiutil or HDIUTIL, canonical_path
+        ):
             raise RunnerError(
                 "A session is already active. Click Unmount before mounting again.\n"
                 f"NTFS mount: {existing.ntfs_mount}"
             )
         # Legacy records deliberately live only in the old user-owned location.
         if legacy_session_present():
-            raise RunnerError(_legacy_session_recovery_message())
+            raise RunnerError(legacy_session_recovery_message())
         # Hold the per-user lock across prepare + osascript so a concurrent
         # elevation cannot sweep this transaction's request/log files.
         with elevation_transaction() as (sess_path, log_path):
@@ -153,7 +173,7 @@ def _mount_in_process(
 ) -> MountSession:
     """In-process mount pipeline (root / already elevated / non-Darwin)."""
     req = _canonicalize_bek_secret(req)
-    volume = _validate_mount_request(req, deps, session_path=session_path)
+    volume = _validate_mount_request(req, deps, log, session_path=session_path)
     fuse_mount = _prepare_fuse_mount(req, elevated=elevated, session_path=session_path, uid=uid)
     ntfs_mount = _allocate_volume_path(req.volume_label)
     fuse_proc: subprocess.Popen[str] | None = None
@@ -264,33 +284,37 @@ def unmount_volume(
     canonical_path = (
         (session_path or active_session_path_for_user()) if needs_elevation() else session_path
     )
-    session = load_session(canonical_path)
+    # A root-owned session file must actually be owned by root; the
+    # unprivileged GUI status read keeps working without the check.
+    require_owner: int | None = 0 if os.geteuid() == 0 else None
+    session = load_session(canonical_path, require_owner=require_owner)
     if session is None:
-        # Probe the old user-owned path, never the trusted canonical state path.
-        if legacy_session_present():
-            raise RunnerError(_legacy_session_recovery_message())
-        raise RunnerError("No active session found to unmount")
+        raise _missing_session_error(canonical_path, require_owner)
 
     if session.elevated and needs_elevation():
         with elevation_transaction() as (_sess_path, log_path):
             run_elevated_unmount(log, log_path=log_path)
         return
 
-    if session.elevated:
-        error = elevated_session_error(session, session_path)
-        if error:
-            raise RunnerError(error)
+    error = session_paths_error(session, canonical_path)
+    if error:
+        raise RunnerError(f"{error}. {manual_session_cleanup_hint(canonical_path)}")
     errors: list[str] = []
-    errors.extend(_unmount_ntfs(deps, session, log))
-    errors.extend(_detach_raw_disk(deps, session, log))
-    errors.extend(_unmount_fuse(deps, session, log))
+    images = _attached_disk_images(deps.hdiutil or HDIUTIL)
+    errors.extend(_unmount_ntfs(deps, session, log, session_path=canonical_path, images=images))
+    if errors:
+        # The volume may still be mounted (unverified, foreign, or busy):
+        # never detach its image or unmount the FUSE layer underneath it.
+        raise RunnerError("Unmount incomplete; state was retained for retry:\n" + "\n".join(errors))
+    errors.extend(_detach_raw_disk(deps, session, log, session_path=canonical_path, images=images))
+    errors.extend(_unmount_fuse(deps, session, log, session_path=canonical_path))
     if not errors:
         errors.extend(
             _remove_fuse_dir(
                 session.fuse_mount, elevated=session.elevated, session_path=canonical_path
             )
         )
-        errors.extend(_remove_empty_ntfs_dir(session.ntfs_mount))
+        errors.extend(_remove_empty_ntfs_dir(session.ntfs_mount, log))
     if not errors:
         clear_session(canonical_path)
     if errors:
@@ -299,13 +323,17 @@ def unmount_volume(
         log("Unmounted successfully")
 
 
-def _legacy_session_recovery_message() -> str:
-    """Explain how to recover safely from untrusted pre-versioned state."""
-    return (
-        "A pre-0.3.0 session record was found and cannot be trusted for automated cleanup. "
-        "Unmount the existing volume manually, detach its raw disk, then remove the old "
-        "dislocker-ui session file before mounting or unmounting again."
-    )
+def _missing_session_error(canonical_path: Path | None, require_owner: int | None) -> RunnerError:
+    """Explain why no trusted session could be loaded for unmount."""
+    if require_owner is not None and session_owner_mismatch(canonical_path, require_owner):
+        return RunnerError(
+            "Session file is not owned by root and cannot be trusted. "
+            + manual_session_cleanup_hint(canonical_path)
+        )
+    # Probe the old user-owned path, never the trusted canonical state path.
+    if legacy_session_present():
+        return RunnerError(legacy_session_recovery_message())
+    return RunnerError("No active session found to unmount")
 
 
 def _canonicalize_bek_secret(req: MountRequest) -> MountRequest:
@@ -332,6 +360,7 @@ def _canonicalize_bek_secret(req: MountRequest) -> MountRequest:
 def _validate_mount_request(
     req: MountRequest,
     deps: DepsStatus,
+    log: LogFn,
     *,
     session_path: Path | None = None,
 ) -> str:
@@ -353,31 +382,27 @@ def _validate_mount_request(
     elif not req.secret:
         raise RunnerError("Password / recovery password is empty")
 
-    existing = load_session(session_path)
-    if existing is not None:
+    require_owner: int | None = 0 if os.geteuid() == 0 else None
+    existing = load_session(session_path, require_owner=require_owner)
+    if (
+        existing is None
+        and require_owner is not None
+        and session_owner_mismatch(session_path, require_owner)
+    ):
+        # A distrusted file must block mounting, not silently orphan live
+        # mounts behind it: the operator removes it by hand (see hint).
+        raise RunnerError(
+            "Session file is not owned by root and cannot be trusted. "
+            + manual_session_cleanup_hint(session_path)
+        )
+    if existing is not None and not _clear_stale_session(
+        existing, session_path, deps.hdiutil or HDIUTIL, log
+    ):
         raise RunnerError(
             "A session is already active. Click Unmount before mounting again.\n"
             f"NTFS mount: {existing.ntfs_mount}"
         )
     return volume
-
-
-def _run_with_fallback(
-    primary: list[str],
-    fallback: list[str],
-    log: LogFn,
-) -> list[str]:
-    """Try *primary*, then *fallback* on failure; return any error messages."""
-    errors: list[str] = []
-    try:
-        _run(primary, log, check=True)
-    except RunnerError as exc:
-        errors.append(str(exc))
-        try:
-            _run(fallback, log, check=True)
-        except RunnerError as exc2:
-            errors.append(str(exc2))
-    return errors
 
 
 def _mount_decrypted_volume(
@@ -408,68 +433,6 @@ def _mount_decrypted_volume(
             )
         return _mount_ntfs(deps, req, device, mountpoint, log, uid=uid, gid=gid)
     return _mount_fat(req, device, mountpoint, log, kind=kind, uid=uid, gid=gid)
-
-
-def _unmount_ntfs(deps: DepsStatus, session: MountSession, log: LogFn) -> list[str]:
-    """Unmount the decrypted volume mountpoint, forcing via diskutil if needed."""
-    log(f"Unmounting volume at {session.ntfs_mount}…")
-    return _run_with_fallback(
-        [deps.umount, session.ntfs_mount],
-        [deps.diskutil or "/usr/sbin/diskutil", "unmount", "force", session.ntfs_mount],
-        log,
-    )
-
-
-def _detach_raw_disk(deps: DepsStatus, session: MountSession, log: LogFn) -> list[str]:
-    """Detach the hdiutil raw disk, forcing if needed."""
-    log(f"Detaching {session.raw_disk}…")
-    return _run_with_fallback(
-        [deps.hdiutil, "detach", session.raw_disk],
-        [deps.hdiutil, "detach", "-force", session.raw_disk],
-        log,
-    )
-
-
-def _unmount_fuse(deps: DepsStatus, session: MountSession, log: LogFn) -> list[str]:
-    """Unmount the dislocker FUSE mount point."""
-    log(f"Unmounting FUSE at {session.fuse_mount}…")
-    try:
-        _run([deps.umount, session.fuse_mount], log, check=True)
-        return []
-    except RunnerError as exc:
-        return [str(exc)]
-
-
-def _remove_fuse_dir(
-    fuse_mount: str, *, elevated: bool = False, session_path: Path | None = None
-) -> list[str]:
-    """Remove the temporary FUSE mount directory if present."""
-    fuse_path = Path(fuse_mount)
-    if elevated and not is_privileged_fuse_path(fuse_path, session_path):
-        raise RunnerError("Refusing to remove a FUSE path outside privileged staging")
-    try:
-        if fuse_path.is_dir():
-            shutil.rmtree(fuse_path)
-    except OSError as exc:
-        return [f"Could not remove FUSE staging directory {fuse_path}: {exc}"]
-    if elevated:
-        remove_empty_privileged_staging_parents(fuse_path, session_path)
-    return []
-
-
-def _remove_empty_ntfs_dir(ntfs_mount: str) -> list[str]:
-    """Remove an empty /Volumes mount-point directory left after unmount."""
-    ntfs_path = Path(ntfs_mount)
-    if not ntfs_path.is_dir():
-        return []
-    try:
-        if not any(ntfs_path.iterdir()):
-            ntfs_path.rmdir()
-        elif ntfs_path.exists():
-            return [f"NTFS mountpoint is not empty: {ntfs_path}"]
-    except OSError as exc:
-        return [f"Could not remove NTFS mountpoint {ntfs_path}: {exc}"]
-    return []
 
 
 def _build_dislocker_cmd(
@@ -583,24 +546,6 @@ def _allocate_volume_path(label: str) -> Path:
     raise RunnerError("Could not allocate a free /Volumes mount point")
 
 
-def _run(
-    cmd: list[str],
-    log: LogFn,
-    check: bool = True,
-) -> subprocess.CompletedProcess[str]:
-    """Run a subprocess, log argv, optionally raise RunnerError on failure."""
-    log(" ".join(cmd))
-    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
-    if proc.stdout.strip():
-        log(proc.stdout.strip())
-    if proc.returncode != 0:
-        err = proc.stderr.strip() or proc.stdout.strip() or f"exit {proc.returncode}"
-        if check:
-            raise RunnerError(err)
-        log(err)
-    return proc
-
-
 def _best_effort_cleanup(
     fuse_mount: Path,
     ntfs_mount: Path,
@@ -613,11 +558,17 @@ def _best_effort_cleanup(
     if ntfs_mount.exists():
         subprocess.run(["/sbin/umount", str(ntfs_mount)], check=False, capture_output=True)
     if raw_disk:
-        subprocess.run(
-            ["/usr/bin/hdiutil", "detach", "-force", raw_disk],
-            check=False,
-            capture_output=True,
-        )
+        images = _attached_disk_images(HDIUTIL)
+        expected = _expected_image_path(str(fuse_mount), "dislocker-file")
+        actual = images.get(raw_disk) if images is not None else None
+        if actual is not None and _normalized_hdiutil_image_path(actual) == expected:
+            subprocess.run(
+                [HDIUTIL, "detach", "-force", raw_disk],
+                check=False,
+                capture_output=True,
+            )
+        else:
+            log(f"raw disk {raw_disk} not verified as our image; left attached — detach manually")
     if fuse_mount.exists():
         subprocess.run(["/sbin/umount", str(fuse_mount)], check=False, capture_output=True)
         shutil.rmtree(fuse_mount, ignore_errors=True)

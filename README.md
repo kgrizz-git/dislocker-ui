@@ -204,8 +204,22 @@ real mounts.
   session state and diagnostics beneath root-controlled `/var/db/dislocker-ui/`.
   Prefer `sudo ./run.sh` so the GUI is already root and skips that path.
 - Always use **Unmount** in the app before ejecting the disk or sleeping the Mac.
+- If Mount says a session is already active after a reboot, see Troubleshooting.
 - Running the GUI as root does not harden a world-writable source tree — keep
   the checkout private.
+
+## Troubleshooting
+
+- **"A session is already active" after a reboot, or Unmount never finishes:**
+  click **Unmount** — 0.5.3+ detects the stale session and cleans it up.
+  On older releases first confirm nothing is still mounted or attached:
+  `mount | grep -E 'DislockerUI|dislocker-ui'` and `hdiutil info` must show none of
+  the session's mounts or its `dislocker-file` image (unmount and detach them
+  first). Only then remove the session file (`sudo ./run.sh`):
+  `sudo rm "/var/root/Library/Application Support/dislocker-ui/active_session.json"`
+  (use your own `$HOME` instead of `/var/root` if your sudo preserves it), or
+  `sudo rm /var/db/dislocker-ui/<uid>/active_session.json` (admin-prompt path).
+  Leftover empty `/Volumes/DislockerUI*` dirs are harmless; remove extras with `sudo rmdir`.
 
 ## Layout
 
