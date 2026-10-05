@@ -135,13 +135,20 @@ def _is_mounted_in(table: dict[str, str] | None, path: str) -> bool:
     """Membership test against an already-read table; None means mounted."""
     if table is None:
         return True
+    return _mount_key(table, path) is not None
+
+
+def _mount_key(table: dict[str, str], path: str) -> str | None:
+    """Return the table key for *path*, allowing a parent-resolved alias.
+
+    Tolerates /tmp vs /private/tmp style aliases by resolving the parent
+    only; the target itself is never statted.
+    """
     if path in table:
-        return True
-    # Tolerate /tmp vs /private/tmp style aliases by resolving the parent
-    # only; the target itself is never statted.
+        return path
     parent = os.path.dirname(path)
     aliased = os.path.join(os.path.realpath(parent), os.path.basename(path))
-    return aliased in table
+    return aliased if aliased in table else None
 
 
 def _unmount_ntfs(
@@ -162,7 +169,8 @@ def _unmount_ntfs(
             f"Could not read the mount table to verify {session.ntfs_mount}; "
             "not unmounting. " + manual_session_cleanup_hint(session_path)
         ]
-    if not _is_mounted_in(table, session.ntfs_mount):
+    key = _mount_key(table, session.ntfs_mount)
+    if key is None:
         log(f"already unmounted: {session.ntfs_mount}")
         return []
     # A reassigned /Volumes mountpoint may now belong to another disk;
@@ -174,7 +182,7 @@ def _unmount_ntfs(
     # cannot prove ownership of a /dev/disk mount, so it refuses.
     if images is None:
         images = _attached_disk_images(deps.hdiutil or HDIUTIL)
-    device = table.get(session.ntfs_mount)
+    device = table[key]
     if device is not None and device.startswith("/dev/disk"):
         if images is None:
             log(f"Could not verify {device} at {session.ntfs_mount} is our image; not unmounting")

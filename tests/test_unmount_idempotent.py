@@ -421,3 +421,52 @@ def test_unmount_mounted_nonempty_dir_retains_session(
         ):
             _unmount_session_file(stored, [])
     assert stored.exists()
+
+
+def test_unmount_checks_device_of_aliased_mountpoint(tmp_path: Path) -> None:
+    """A mount listed under a parent-resolved alias still gets the identity check."""
+    with _fuse_dir() as fuse:
+        session = _session(fuse_mount=str(fuse))
+        stored = _stored_session(tmp_path, session)
+        parent = os.path.dirname(session.ntfs_mount)
+        alias = os.path.join("/private" + parent, os.path.basename(session.ntfs_mount))
+        table = f"/dev/disk5 on {alias} (apfs, local, journaled)\n"
+        ours = [_image_entry(str(fuse / "dislocker-file"), "/dev/disk9")]
+        run = _mount_responder(table=table, info_images=ours)
+        real_realpath = os.path.realpath
+
+        def _realpath(path: str, **kwargs: object) -> str:
+            if path == parent:
+                return "/private" + parent
+            return real_realpath(path, **kwargs)  # type: ignore[arg-type]
+
+        with (
+            patch("dislocker_ui.unmount_steps.os.path.realpath", side_effect=_realpath),
+            patch("dislocker_ui.unmount_steps.subprocess.run", run),
+            pytest.raises(RunnerError, match="different disk"),
+        ):
+            _unmount_session_file(stored, [])
+    assert stored.exists()
+    assert [c for c in run.call_args_list if c.args[0][0] == _UMOUNT] == []
+
+
+def test_unmount_stops_before_detach_when_volume_unmount_fails(tmp_path: Path) -> None:
+    """A volume that stays mounted never has its image detached under it."""
+    with _fuse_dir() as fuse:
+        session = _session(fuse_mount=str(fuse))
+        stored = _stored_session(tmp_path, session)
+        table = (
+            f"/dev/disk9s1 on {session.ntfs_mount} (msdos, local)\n"
+            f"dislocker on {session.fuse_mount} (macfuse, local)\n"
+        )
+        ours = [_image_entry(str(fuse / "dislocker-file"), "/dev/disk9", "/dev/disk9s1")]
+        run = _mount_responder(table=table, other_rc=1, other_err="busy", info_images=ours)
+        with (
+            patch("dislocker_ui.unmount_steps.subprocess.run", run),
+            pytest.raises(RunnerError, match="retained"),
+        ):
+            _unmount_session_file(stored, [])
+    assert stored.exists()
+    attempted = [c.args[0] for c in run.call_args_list]
+    assert not any("detach" in cmd for cmd in attempted)
+    assert [_UMOUNT, session.fuse_mount] not in attempted

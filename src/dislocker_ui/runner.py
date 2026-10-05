@@ -302,6 +302,10 @@ def unmount_volume(
     errors: list[str] = []
     images = _attached_disk_images(deps.hdiutil or HDIUTIL)
     errors.extend(_unmount_ntfs(deps, session, log, session_path=canonical_path, images=images))
+    if errors:
+        # The volume may still be mounted (unverified, foreign, or busy):
+        # never detach its image or unmount the FUSE layer underneath it.
+        raise RunnerError("Unmount incomplete; state was retained for retry:\n" + "\n".join(errors))
     errors.extend(_detach_raw_disk(deps, session, log, session_path=canonical_path, images=images))
     errors.extend(_unmount_fuse(deps, session, log))
     if not errors:
