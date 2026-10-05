@@ -412,3 +412,25 @@ def test_scan_refuses_when_vanished_probe_cannot_inspect(tmp_path: Path) -> None
         pytest.raises(RunnerError, match="cannot inspect"),
     ):
         _assert_no_writable_py_files(pkg)
+
+
+def test_unclassified_entry_refuses_when_vanished_probe_cannot_inspect(tmp_path: Path) -> None:
+    """A non-module lstat ENOENT whose re-probe fails otherwise is not skipped."""
+    from dislocker_ui.elevate import _check_unclassified_entry
+
+    entry = tmp_path / "notes.txt"
+    errors = iter(
+        [
+            FileNotFoundError(2, "No such file or directory", str(entry)),
+            PermissionError(13, "Permission denied", str(entry)),
+        ]
+    )
+
+    def _lstat(path: object, *args: object, **kwargs: object) -> os.stat_result:
+        raise next(errors)
+
+    with (
+        patch("dislocker_ui.elevate.os.lstat", _lstat),
+        pytest.raises(RunnerError, match="cannot inspect"),
+    ):
+        _check_unclassified_entry(entry)

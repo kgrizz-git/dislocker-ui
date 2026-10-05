@@ -388,7 +388,11 @@ def _check_files_writable(dirpath: Path, filenames: list[str]) -> None:
 
 
 def _check_unclassified_entry(entry: Path) -> None:
-    """Fail the scan when a non-module entry is a directory os.walk skipped."""
+    """Fail the scan when a non-module entry is a directory os.walk skipped.
+
+    An entry confirmed gone since the listing is skipped; any other lstat
+    failure fails the scan.
+    """
     try:
         mode = os.lstat(entry).st_mode
     except OSError as exc:
