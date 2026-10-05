@@ -324,17 +324,21 @@ def _scan_blocked_error(path: object, detail: object) -> RunnerError:
     )
 
 
-def _entry_is_symlink(entry: Path) -> bool:
-    """Return whether *entry* is a symlink; never raises.
+def _entry_vanished(entry: Path) -> bool:
+    """Return True only when a follow-up lstat confirms *entry* is gone.
 
-    Only meaningful after a failed stat: it distinguishes a dangling
-    symlink (refuse — it could be swapped for a writable target) from a
-    plain vanished entry (skip — it cannot hide a module).
+    Called after a stat failed with ENOENT. A confirmed-absent entry cannot
+    hide a module, so the caller skips it. An entry that still exists (a
+    dangling symlink) returns False so the caller refuses, and any other
+    lstat error raises: an entry that cannot be inspected is never skipped.
     """
     try:
-        return stat.S_ISLNK(os.lstat(entry).st_mode)
-    except OSError:
-        return False
+        os.lstat(entry)
+    except FileNotFoundError:
+        return True
+    except OSError as exc:
+        raise _scan_blocked_error(entry, exc) from exc
+    return False
 
 
 def _check_dir_writable(dirpath: Path, src_root: Path) -> None:
@@ -373,7 +377,7 @@ def _check_files_writable(dirpath: Path, filenames: list[str]) -> None:
         except OSError as exc:
             # A non-symlink that vanished mid-scan (e.g. a purged cache)
             # cannot hide a module; only dangling symlinks refuse.
-            if exc.errno == errno.ENOENT and not _entry_is_symlink(entry):
+            if exc.errno == errno.ENOENT and _entry_vanished(entry):
                 continue
             raise _scan_blocked_error(entry, exc) from exc
         if mode & 0o022:
@@ -390,7 +394,7 @@ def _check_unclassified_entry(entry: Path) -> None:
     except OSError as exc:
         # Mirror the module branch: a non-symlink that vanished between
         # scandir and lstat cannot hide anything; dangling symlinks refuse.
-        if exc.errno == errno.ENOENT and not _entry_is_symlink(entry):
+        if exc.errno == errno.ENOENT and _entry_vanished(entry):
             return
         raise _scan_blocked_error(entry, exc) from exc
     if stat.S_ISDIR(mode):

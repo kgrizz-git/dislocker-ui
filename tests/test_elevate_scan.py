@@ -107,7 +107,17 @@ def test_scan_skips_vanished_non_symlink_module(tmp_path: Path) -> None:
             raise FileNotFoundError(2, "No such file or directory", str(mod))
         return real_stat(self, *args, **kwargs)  # type: ignore[arg-type]
 
-    with patch("pathlib.Path.stat", _stat):
+    real_lstat = os.lstat
+
+    def _lstat(path: object, *args: object, **kwargs: object) -> os.stat_result:
+        if str(path) == str(mod):
+            raise FileNotFoundError(2, "No such file or directory", str(mod))
+        return real_lstat(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    with (
+        patch("pathlib.Path.stat", _stat),
+        patch("dislocker_ui.elevate.os.lstat", _lstat),
+    ):
         _assert_no_writable_py_files(pkg)
 
 
@@ -375,3 +385,30 @@ def test_assert_no_writable_py_files_prunes_excluded_dir_descendants(
     ok.write_text("", encoding="utf-8")
     ok.chmod(0o644)
     _assert_no_writable_py_files(root)
+
+
+def test_scan_refuses_when_vanished_probe_cannot_inspect(tmp_path: Path) -> None:
+    """A stat ENOENT whose lstat probe fails otherwise is never skipped."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    mod = pkg / "mod.py"
+    mod.write_text("", encoding="utf-8")
+    real_stat = Path.stat
+    real_lstat = os.lstat
+
+    def _stat(self: Path, *args: object, **kwargs: object) -> os.stat_result:
+        if str(self) == str(mod):
+            raise FileNotFoundError(2, "No such file or directory", str(mod))
+        return real_stat(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    def _lstat(path: object, *args: object, **kwargs: object) -> os.stat_result:
+        if str(path) == str(mod):
+            raise PermissionError(13, "Permission denied", str(mod))
+        return real_lstat(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    with (
+        patch("pathlib.Path.stat", _stat),
+        patch("dislocker_ui.elevate.os.lstat", _lstat),
+        pytest.raises(RunnerError, match="cannot inspect"),
+    ):
+        _assert_no_writable_py_files(pkg)

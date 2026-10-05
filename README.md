@@ -241,10 +241,11 @@ A condensed version of this list is in the app under Help → Troubleshooting.
   needs to open removable `/dev/disk*`, which macOS TCC blocks for
   an unprivileged GUI and its administrator-prompt child. Launch
   with `sudo ./run.sh`. Without sudo the app cannot complete a mount.
-- **"Refusing to elevate: cannot inspect …"** — usually a root-owned
-  or unreadable file under `src/` (e.g. a `__pycache__` left by an
-  earlier `sudo ./run.sh`). Follow the printed hint, or launch with
-  `sudo ./run.sh` instead.
+- **"Refusing to elevate: cannot inspect …"** — a broken `.py` symlink
+  under `src/` must be removed (`sudo ./run.sh` refuses importable `.py`
+  symlinks too). For a root-owned or unreadable entry (e.g. a
+  `__pycache__` left by an earlier `sudo ./run.sh`), follow the printed
+  hint, or launch with `sudo ./run.sh`.
 
 ## Layout
 

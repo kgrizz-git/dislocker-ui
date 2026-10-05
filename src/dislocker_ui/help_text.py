@@ -62,10 +62,11 @@ mbedtls@3 and re-create the libmbedcrypto symlink (see the
 README install section); re-run it after each upgrade.
 Cannot open the disk: launch with sudo ./run.sh — an
 unprivileged GUI is blocked by macOS TCC.
-"Refusing to elevate: cannot inspect ...": usually a
-root-owned or unreadable file under src/ (e.g. a __pycache__
-left by an earlier sudo ./run.sh). Follow the printed
-hint, or launch with sudo ./run.sh instead.
+"Refusing to elevate: cannot inspect ...": a broken .py
+symlink under src/ must be removed (sudo ./run.sh refuses
+importable .py symlinks too). For a root-owned or unreadable
+entry (e.g. a __pycache__ left by an earlier sudo ./run.sh),
+follow the printed hint, or launch with sudo ./run.sh.
 """
 
 
