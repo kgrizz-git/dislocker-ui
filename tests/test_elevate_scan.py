@@ -74,14 +74,14 @@ def test_scan_skips_vanished_non_symlink_module(tmp_path: Path) -> None:
     pkg.mkdir()
     mod = pkg / "mod.py"
     mod.write_text("", encoding="utf-8")
-    real_stat = os.stat
+    real_stat = Path.stat
 
-    def _stat(path: object, *args: object, **kwargs: object) -> os.stat_result:
-        if str(path) == str(mod):
+    def _stat(self: Path, *args: object, **kwargs: object) -> os.stat_result:
+        if str(self) == str(mod):
             raise FileNotFoundError(2, "No such file or directory", str(mod))
-        return real_stat(path, *args, **kwargs)  # type: ignore[arg-type]
+        return real_stat(self, *args, **kwargs)  # type: ignore[arg-type]
 
-    with patch("os.stat", side_effect=_stat):
+    with patch("pathlib.Path.stat", _stat):
         _assert_no_writable_py_files(pkg)
 
 
@@ -200,21 +200,21 @@ def test_assert_no_writable_py_files_stat_error_raises(tmp_path: Path) -> None:
     pkg.mkdir()
     mod = pkg / "mod.py"
     mod.write_text("", encoding="utf-8")
-    real_stat = os.stat
+    real_stat = Path.stat
 
-    def _stat(path: object, *args: object, **kwargs: object) -> os.stat_result:
-        if str(path) == str(mod):
+    def _stat(self: Path, *args: object, **kwargs: object) -> os.stat_result:
+        if str(self) == str(mod):
             raise OSError("cannot stat")
-        return real_stat(path, *args, **kwargs)  # type: ignore[arg-type]
+        return real_stat(self, *args, **kwargs)  # type: ignore[arg-type]
 
     with (
-        patch("os.stat", side_effect=_stat),
+        patch("pathlib.Path.stat", _stat),
         pytest.raises(RunnerError, match=r"mod\.py") as excinfo,
     ):
         _check_files_writable(pkg, ["mod.py"])
     assert "chown" in str(excinfo.value)
     with (
-        patch("os.stat", side_effect=OSError("cannot stat")),
+        patch("pathlib.Path.stat", side_effect=OSError("cannot stat")),
         pytest.raises(RunnerError, match="pkg"),
     ):
         _check_dir_writable(pkg, tmp_path)

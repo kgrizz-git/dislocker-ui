@@ -220,7 +220,7 @@ A condensed version of this list is in the app under Help → Troubleshooting.
   first). Only then remove the session file (`sudo ./run.sh`):
   `sudo rm "/var/root/Library/Application Support/dislocker-ui/active_session.json"`
   (use your own `$HOME` instead of `/var/root` if your sudo preserves it), or
-  `sudo rm /var/db/dislocker-ui/<uid>/active_session.json` (admin-prompt path).
+  `sudo rm "/var/db/dislocker-ui/$(id -u)/active_session.json"` (admin-prompt path).
   Leftover empty `/Volumes/DislockerUI*` dirs are harmless; remove extras with `sudo rmdir`.
 - **"Missing required tools"** — run the one-time root install
   (Installation, section 4): `sudo scripts/install-root-deps.sh`,

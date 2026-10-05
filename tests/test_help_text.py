@@ -44,7 +44,7 @@ def test_troubleshooting_covers_stale_session_recovery() -> None:
     assert "hdiutil info" in TROUBLESHOOTING_TEXT
     assert "sudo rm" in TROUBLESHOOTING_TEXT
     assert "active_session.json" in TROUBLESHOOTING_TEXT
-    assert "/var/db/dislocker-ui/<uid>/active_session.json" in TROUBLESHOOTING_TEXT
+    assert "/var/db/dislocker-ui/$(id -u)/active_session.json" in TROUBLESHOOTING_TEXT
 
 
 @pytest.mark.parametrize("text", (*_ALL_TEXTS, REPO_URL))

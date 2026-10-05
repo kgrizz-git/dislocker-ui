@@ -47,7 +47,7 @@ is still mounted or attached (mount | grep -E
 'DislockerUI|dislocker-ui'; hdiutil info), then:
 sudo rm "/var/root/Library/Application Support/dislocker-ui/active_session.json"
 ($HOME instead of /var/root if your sudo preserves it;
-sudo rm /var/db/dislocker-ui/<uid>/active_session.json
+sudo rm "/var/db/dislocker-ui/$(id -u)/active_session.json"
 for the admin-prompt path).
 "Missing required tools": run sudo scripts/install-root-deps.sh,
 then Recheck deps.
