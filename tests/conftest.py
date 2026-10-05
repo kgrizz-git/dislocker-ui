@@ -6,7 +6,42 @@ import contextlib
 import os
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import patch
+
+import pytest
+
+if TYPE_CHECKING:
+    import tkinter as tk
+
+
+@pytest.fixture
+def tk_root() -> tk.Tk:
+    """
+    Create a withdrawn Tk root for headless widget tests.
+
+    tkinter is imported lazily so non-GUI tests still collect where
+    tkinter is unavailable; zero-delay `after(0, …)` callbacks run
+    immediately so tests never call `update()` (which can hang under
+    macOS Tk when reusing the process).
+    """
+    tk = pytest.importorskip("tkinter")
+    root = tk.Tk()
+    root.withdraw()
+    real_after = root.after
+
+    def after(ms: object, func: object | None = None, *args: object) -> object:
+        if func is not None and int(ms) == 0:  # type: ignore[arg-type]
+            assert callable(func)
+            func(*args)
+            return "after-immediate"
+        return real_after(ms, func, *args)  # type: ignore[arg-type]
+
+    root.after = after  # type: ignore[method-assign]
+    try:
+        yield root
+    finally:
+        root.destroy()
 
 
 @contextlib.contextmanager

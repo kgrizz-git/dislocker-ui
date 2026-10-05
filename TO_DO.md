@@ -13,26 +13,19 @@ Open work only for **dislocker-ui**.
 
 ## Active
 
-- [Documentation and in-app help](plans/2026-10-01-docs-and-in-app-help.md):
-  add README Troubleshooting section (stale-session recovery, missing
-  tools, macFUSE/TCC, mbedtls symlink), and a minimal in-app Help menu
-  (About / Usage / Troubleshooting) with text in a new `help_text.py`.
-  Extend the minimal Troubleshooting section shipped in 0.5.3.
 - Stale-session fix (0.5.3, [archived plan](plans/archive/2026-10-03-stale-session-unmount.md)):
   manual verification only — mount a BitLocker volume, reboot, launch, and
   confirm Mount self-heals (or Unmount clears) with no eject of unrelated
   disks (`diskutil list` before/after).
-- [Privileged helper hardening](plans/2026-08-05-privileged-helper-hardening.md):
-  remediate the security audit findings in the elevated mount/unmount workflow.
-  - Follow-up (reviews 2026-09-15/16, deferred deliberately): the osascript
-    preflight `elevate._assert_no_writable_py_files` is fail-open where
-    `run.sh` is now fail-closed — it silently skips unreadable dirs (`os.walk`
-    without `onerror`) and swallows per-file stat `OSError`s, and it follows
-    `.py` symlinks checking only target mode bits. Scope if ever taken up:
-    fail closed on scan *incompleteness* only (raise on walk/stat errors with
-    an ownership-fix message), NOT full `run.sh` parity — outright symlink
-    refusal belongs to the rare sudo-launch path; on the everyday elevation
-    path it would strand legitimate checkouts (e.g. root-owned caches from a
-    prior sudo run). No live hole either way: exploitation still needs
-    directory-write (refused when visible) or same-user tampering (out of
-    scope).
+- Privileged-helper hardening residual ([archived plan](plans/archive/2026-10-04-privileged-helper-hardening.md)):
+  the elevation scan still follows `.py` symlinks (checking only target
+  mode bits), and `os.walk(followlinks=False)` never descends symlinked
+  directories under `src/` (they stay unscanned). Refusing symlinked
+  modules/dirs is deferred: legitimate checkouts use links (editable
+  installs, shared tooling), and refusing them on the everyday elevation
+  path would strand those checkouts; `run.sh` already refuses both on
+  the rare sudo-launch path.
+- Docs/help menu (0.6.0, [archived plan](plans/archive/2026-10-04-docs-and-in-app-help.md)):
+  manual verification only — on macOS confirm the Help-only menubar keeps
+  Tk's default application menu and Cmd-Q, and that Help merges into
+  the system Help menu.

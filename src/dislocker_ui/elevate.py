@@ -27,12 +27,14 @@ Requirements:
 from __future__ import annotations
 
 import contextlib
+import errno
 import fcntl
 import hashlib
 import json
 import os
 import re
 import shlex
+import stat
 import subprocess
 import sys
 import tempfile
@@ -268,17 +270,23 @@ def _assert_no_writable_py_files(src_root: Path) -> None:
     """Refuse elevation if any .py, .pyc, .so, directory, or __pycache__ under *src_root* is writable.
 
     Root imports these modules via PYTHONPATH; a writable source file, bytecode
-    file, or directory is a trojan vector.  Skips the recursive scan for
-    pip-installed packages (site-packages / dist-packages) where the package
-    manager controls file modes and scanning the entire directory would be
-    prohibitively slow.  Known non-code directories (build artifacts, caches,
-    VCS metadata) are pruned before descent to avoid false positives on
-    ``pip install -e`` checkouts.
+    file, or directory is a trojan vector.  The scan is fail-closed on
+    incompleteness: unreadable directories and stat failures raise instead
+    of being skipped, since an unscanned entry could hide a writable file.
+    Symlinked directories are never descended into (documented exclusion,
+    tracked in TO_DO.md): `os.walk` runs with `followlinks=False`.
+    Skips the recursive scan for pip-installed packages (site-packages /
+    dist-packages) where the package manager controls file modes and scanning
+    the entire directory would be prohibitively slow.  Known non-code
+    directories (build artifacts, caches, VCS metadata) are pruned before
+    descent to avoid false positives on ``pip install -e`` checkouts.
     """
     if _is_system_managed_install(src_root):
         return
     src_str = str(src_root)
-    for dirpath_str, dirnames, filenames in os.walk(src_str, topdown=True):
+    for dirpath_str, dirnames, filenames in os.walk(
+        src_str, topdown=True, onerror=_raise_walk_error
+    ):
         dirpath = Path(dirpath_str)
         dirnames[:] = [
             d for d in dirnames if d not in _NON_CODE_DIRS and not d.endswith(".egg-info")
@@ -287,36 +295,119 @@ def _assert_no_writable_py_files(src_root: Path) -> None:
         _check_files_writable(dirpath, filenames)
 
 
+def _raise_walk_error(error: OSError) -> None:
+    """Fail a scan when os.walk cannot list a directory."""
+    raise _scan_blocked_error(error.filename, error)
+
+
+def _scan_blocked_error(path: object, detail: object) -> RunnerError:
+    """Build the fail-closed error for an unscannable scan entry.
+
+    Dangling entries (ENOENT, e.g. broken symlinks) cannot be fixed by
+    re-owning them, so the message says to remove the entry instead.
+    """
+    if path is None:
+        return RunnerError(
+            "Refusing to elevate: cannot inspect a source-tree entry "
+            f"(path unknown: {detail}). Check permissions and ownership "
+            "of the source tree, then retry."
+        )
+    location = shlex.quote(str(path))
+    if isinstance(detail, OSError) and detail.errno == errno.ENOENT:
+        return RunnerError(
+            f"Refusing to elevate: cannot inspect {location} ({detail}). "
+            f"Remove the broken entry: rm {location}"
+        )
+    return RunnerError(
+        f"Refusing to elevate: cannot inspect {location} ({detail}). "
+        f'Check permissions and ownership, e.g. sudo chown "$USER" {location}'
+    )
+
+
+def _entry_vanished(entry: Path) -> bool:
+    """Return True only when a follow-up lstat confirms *entry* is gone.
+
+    Called after a stat failed with ENOENT. A confirmed-absent entry cannot
+    hide a module, so the caller skips it. An entry that still exists (a
+    dangling symlink) returns False so the caller refuses, and any other
+    lstat error raises: an entry that cannot be inspected is never skipped.
+    """
+    try:
+        os.lstat(entry)
+    except FileNotFoundError:
+        return True
+    except OSError as exc:
+        raise _scan_blocked_error(entry, exc) from exc
+    return False
+
+
 def _check_dir_writable(dirpath: Path, src_root: Path) -> None:
-    """Raise RunnerError if *dirpath* is group/world-writable (except src_root itself)."""
+    """Raise RunnerError if *dirpath* is group/world-writable (except src_root itself).
+
+    Stat failures raise: an unscanned directory could hide writable files.
+    """
     if dirpath == src_root:
         return
     try:
         mode = dirpath.stat().st_mode
-    except OSError:
-        return
+    except OSError as exc:
+        raise _scan_blocked_error(dirpath, exc) from exc
     if mode & 0o022:
         raise RunnerError(
             f"Refusing to elevate: directory {dirpath} is group/world-writable "
-            f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {dirpath}"
+            f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {shlex.quote(str(dirpath))}"
         )
 
 
 def _check_files_writable(dirpath: Path, filenames: list[str]) -> None:
-    """Raise RunnerError if any .py/.pyc/.so in *filenames* is group/world-writable."""
+    """Raise RunnerError if any .py/.pyc/.so in *filenames* is group/world-writable.
+
+    os.walk files an entry under *filenames* when classifying it as a
+    directory fails, and then never descends into it. Any non-module name
+    that turns out to be a real directory therefore means part of the tree
+    went unscanned, which fails closed like an unreadable directory.
+    """
     for name in filenames:
         entry = dirpath / name
         if entry.suffix not in (".py", ".pyc", ".so"):
+            _check_unclassified_entry(entry)
             continue
         try:
             mode = entry.stat().st_mode
-        except OSError:
-            continue
+        except OSError as exc:
+            # A non-symlink that vanished mid-scan (e.g. a purged cache)
+            # cannot hide a module; only dangling symlinks refuse.
+            if exc.errno == errno.ENOENT and _entry_vanished(entry):
+                continue
+            raise _scan_blocked_error(entry, exc) from exc
         if mode & 0o022:
             raise RunnerError(
                 f"Refusing to elevate: {entry} is group/world-writable "
-                f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {entry}"
+                f"(mode {oct(mode & 0o777)}). Fix with: chmod o-w,g-w {shlex.quote(str(entry))}"
             )
+
+
+def _check_unclassified_entry(entry: Path) -> None:
+    """Fail the scan when a non-module entry is a directory os.walk skipped.
+
+    An entry confirmed gone since the listing is skipped; any other lstat
+    failure fails the scan.
+    """
+    try:
+        mode = os.lstat(entry).st_mode
+    except OSError as exc:
+        # Mirror the module branch: a non-symlink that vanished between
+        # scandir and lstat cannot hide anything; dangling symlinks refuse.
+        if exc.errno == errno.ENOENT and _entry_vanished(entry):
+            return
+        raise _scan_blocked_error(entry, exc) from exc
+    if stat.S_ISDIR(mode):
+        raise RunnerError(
+            f"Refusing to elevate: {shlex.quote(str(entry))} is a directory "
+            "the scan did not descend into. Re-run Mount once (a transient "
+            "listing race usually clears); if it persists, check that "
+            "directory's permissions."
+        )
 
 
 def _is_system_managed_install(src_root: Path) -> bool:

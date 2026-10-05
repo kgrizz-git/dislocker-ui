@@ -22,7 +22,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from dislocker_ui import __version__
+from dislocker_ui import __version__, help_text
 from dislocker_ui.deps import DepsStatus, discover_deps, discover_privileged_deps
 from dislocker_ui.disks import DiskEntry, list_disk_entries
 from dislocker_ui.elevate import ElevationCancelled, ElevationTimedOut, needs_elevation
@@ -65,6 +65,7 @@ class DislockerApp(ttk.Frame):
         self.deps: DepsStatus = _discover_deps_for_euid()
         self.disk_entries: list[DiskEntry] = []
         self._busy = False
+        self._help_dialogs: dict[str, tk.Toplevel] = {}
 
         self.volume_var = tk.StringVar()
         self.method_var = tk.StringVar(value=UnlockMethod.USER_PASSWORD.value)
@@ -84,6 +85,7 @@ class DislockerApp(ttk.Frame):
         """Construct widgets."""
         self.master.title(f"dislocker-ui {__version__}")
         self.master.minsize(640, 480)
+        self._build_menu()
 
         deps_row = ttk.Frame(self)
         deps_row.pack(fill=tk.X, pady=(0, 8))
@@ -161,6 +163,47 @@ class DislockerApp(ttk.Frame):
         scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
         scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_text.configure(yscrollcommand=scroll.set)
+
+    def _build_menu(self) -> None:
+        """Attach the menubar with the Help menu."""
+        menubar = tk.Menu(self.master)
+        help_menu = tk.Menu(menubar, name="help", tearoff=0)
+        help_menu.add_command(label="About dislocker-ui", command=self._show_about)
+        help_menu.add_command(
+            label="Usage",
+            command=lambda: self._show_help_text("Usage", help_text.USAGE_TEXT),
+        )
+        help_menu.add_command(
+            label="Troubleshooting",
+            command=lambda: self._show_help_text("Troubleshooting", help_text.TROUBLESHOOTING_TEXT),
+        )
+        menubar.add_cascade(label="Help", menu=help_menu)
+        # Same as configure(menu=...); item assignment avoids a Sonar S930 false positive.
+        self.master["menu"] = menubar
+
+    def _show_about(self) -> None:
+        """Show the About dialog."""
+        messagebox.showinfo(
+            "About dislocker-ui", help_text.about_text(__version__), parent=self.master
+        )
+
+    def _show_help_text(self, title: str, text: str) -> None:
+        """Show a read-only help dialog (at most one per title)."""
+        existing = self._help_dialogs.get(title)
+        if existing is not None and existing.winfo_exists():
+            existing.deiconify()
+            existing.lift()
+            existing.focus_set()
+            return
+        dialog = tk.Toplevel(self.master)
+        dialog.title(title)
+        dialog.transient(self.master)
+        body = tk.Text(dialog, wrap="word")
+        body.insert(tk.END, text)
+        body.configure(state="disabled")
+        body.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
+        ttk.Button(dialog, text="Close", command=dialog.destroy).pack(pady=(0, 8))
+        self._help_dialogs[title] = dialog
 
     def _recheck_deps(self) -> None:
         """Re-run dependency discovery."""

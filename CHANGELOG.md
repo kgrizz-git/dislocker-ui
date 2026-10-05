@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.6.0] - 2026-10-04
+
+### Added
+
+- Help menu in the app (About / Usage / Troubleshooting), with the
+  troubleshooting list also expanded in the README.
+- Expanded README Troubleshooting section covering missing tools,
+  ntfs-3g, macFUSE approval, post-`brew upgrade` breakage, and TCC.
+
+### Changed
+
+- Administrator-prompt elevation now refuses when the source scan cannot
+  inspect part of `src/` (unreadable or broken entries), with a fix hint.
+
 ## [0.5.3] - 2026-10-03
 
 ### Fixed

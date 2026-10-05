@@ -353,7 +353,7 @@ root-child unmount):
       no longer block mounting.
 - [x] README: this plan does **not** own the stale-session recovery text.
       The Troubleshooting section from
-      `plans/2026-10-01-docs-and-in-app-help.md` owns the self-healing
+      `plans/archive/2026-10-04-docs-and-in-app-help.md` owns the self-healing
       wording and the manual `sudo rm` command. This plan adds only a
       one-line pointer in "Safety notes" ("If Mount says a session is
       already active after a reboot, see Troubleshooting"). If this plan

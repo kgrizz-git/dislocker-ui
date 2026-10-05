@@ -75,32 +75,6 @@ def _sample_session(*, readonly: bool = True) -> MountSession:
     )
 
 
-@pytest.fixture
-def tk_root() -> tk.Tk:
-    """
-    Create a withdrawn Tk root for headless widget tests.
-
-    Zero-delay `after(0, …)` callbacks run immediately so tests never call
-    `update()` (which can hang under macOS Tk when reusing the process).
-    """
-    root = tk.Tk()
-    root.withdraw()
-    real_after = root.after
-
-    def after(ms: object, func: object | None = None, *args: object) -> object:
-        if func is not None and int(ms) == 0:  # type: ignore[arg-type]
-            assert callable(func)
-            func(*args)
-            return "after-immediate"
-        return real_after(ms, func, *args)  # type: ignore[arg-type]
-
-    root.after = after  # type: ignore[method-assign]
-    try:
-        yield root
-    finally:
-        root.destroy()
-
-
 @pytest.fixture(autouse=True)
 def no_elevation(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep GUI unit tests independent of the host platform's privilege state."""

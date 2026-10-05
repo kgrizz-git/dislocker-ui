@@ -210,6 +210,8 @@ real mounts.
 
 ## Troubleshooting
 
+A condensed version of this list is in the app under Help → Troubleshooting.
+
 - **"A session is already active" after a reboot, or Unmount never finishes:**
   click **Unmount** — 0.5.3+ detects the stale session and cleans it up.
   On older releases first confirm nothing is still mounted or attached:
@@ -218,8 +220,32 @@ real mounts.
   first). Only then remove the session file (`sudo ./run.sh`):
   `sudo rm "/var/root/Library/Application Support/dislocker-ui/active_session.json"`
   (use your own `$HOME` instead of `/var/root` if your sudo preserves it), or
-  `sudo rm /var/db/dislocker-ui/<uid>/active_session.json` (admin-prompt path).
+  `sudo rm "/var/db/dislocker-ui/$(id -u)/active_session.json"` (admin-prompt path).
   Leftover empty `/Volumes/DislockerUI*` dirs are harmless; remove extras with `sudo rmdir`.
+- **"Missing required tools"** — install per Installation, section 3
+  (Homebrew tap; satisfies the GUI check), then run the one-time root
+  install from the repo root (section 4):
+  `sudo scripts/install-root-deps.sh`, then click **Recheck deps**.
+- **"NTFS volume requires ntfs-3g"** — install it per Installation
+  sections 3–4. FAT/ExFAT BitLocker To Go volumes mount with the
+  system `mount_msdos` / `mount_exfat` helpers and don't need it.
+- **macFUSE not approved / mount fails after install or reboot** —
+  the approval appears the first time you actually mount a FUSE
+  volume (System Settings → Privacy & Security). On Apple Silicon,
+  enabling kernel extensions may first require Recovery; then reboot.
+- **dislocker stops loading after `brew upgrade`** (missing
+  `libmbedcrypto`) — re-apply the mbedtls@3 symlink fix in
+  Installation, section 3, then Recheck deps. The symlink can
+  break on every upgrade.
+- **Cannot open the disk / permission denied (TCC)** — mounting
+  needs to open removable `/dev/disk*`, which macOS TCC blocks for
+  an unprivileged GUI and its administrator-prompt child. Launch
+  with `sudo ./run.sh`. Without sudo the app cannot complete a mount.
+- **"Refusing to elevate: …"** — a broken `.py` symlink under `src/`
+  must be removed (`sudo ./run.sh` refuses importable `.py` symlinks
+  too). For an unreadable entry (e.g. a mode-0700 `__pycache__` left by
+  an earlier `sudo ./run.sh` under a restrictive umask), follow the
+  printed hint, or launch with `sudo ./run.sh`.
 
 ## Layout
 
