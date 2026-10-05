@@ -231,6 +231,8 @@ def test_unmount_refuses_volume_when_mount_table_fails(tmp_path: Path) -> None:
     attempted = [c.args[0] for c in run.call_args_list]
     assert [_UMOUNT, session.ntfs_mount] not in attempted
     assert not any(cmd[-3:-1] == ["unmount", "force"] for cmd in attempted)
+    assert not any("detach" in cmd for cmd in attempted)
+    assert [_UMOUNT, session.fuse_mount] not in attempted
 
 
 def test_unmount_live_failure_retains_session(tmp_path: Path) -> None:
@@ -463,10 +465,12 @@ def test_unmount_stops_before_detach_when_volume_unmount_fails(tmp_path: Path) -
         run = _mount_responder(table=table, other_rc=1, other_err="busy", info_images=ours)
         with (
             patch("dislocker_ui.unmount_steps.subprocess.run", run),
-            pytest.raises(RunnerError, match="retained"),
+            pytest.raises(RunnerError, match="retained") as excinfo,
         ):
             _unmount_session_file(stored, [])
     assert stored.exists()
+    assert "Close any app using it" in str(excinfo.value)
+    assert "left untouched" in str(excinfo.value)
     attempted = [c.args[0] for c in run.call_args_list]
     assert not any("detach" in cmd for cmd in attempted)
     assert [_UMOUNT, session.fuse_mount] not in attempted

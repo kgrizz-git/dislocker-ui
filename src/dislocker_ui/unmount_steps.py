@@ -183,7 +183,7 @@ def _unmount_ntfs(
     if images is None:
         images = _attached_disk_images(deps.hdiutil or HDIUTIL)
     device = table[key]
-    if device is not None and device.startswith("/dev/disk"):
+    if device.startswith("/dev/disk"):
         if images is None:
             log(f"Could not verify {device} at {session.ntfs_mount} is our image; not unmounting")
             return [
@@ -198,11 +198,17 @@ def _unmount_ntfs(
                 "not unmounting. " + manual_session_cleanup_hint(session_path)
             ]
     log(f"Unmounting volume at {session.ntfs_mount}…")
-    return _run_with_fallback(
+    errors = _run_with_fallback(
         [deps.umount, session.ntfs_mount],
         [deps.diskutil or "/usr/sbin/diskutil", "unmount", "force", session.ntfs_mount],
         log,
     )
+    if errors:
+        errors.append(
+            f"{session.ntfs_mount} is still mounted. Close any app using it and click "
+            "Unmount again. " + manual_session_cleanup_hint(session_path)
+        )
+    return errors
 
 
 def _attached_disk_images(hdiutil: str) -> dict[str, str] | None:
