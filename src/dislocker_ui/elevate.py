@@ -306,7 +306,13 @@ def _scan_blocked_error(path: object, detail: object) -> RunnerError:
     Dangling entries (ENOENT, e.g. broken symlinks) cannot be fixed by
     re-owning them, so the message says to remove the entry instead.
     """
-    location = shlex.quote(str(path)) if path is not None else "<unknown>"
+    if path is None:
+        return RunnerError(
+            "Refusing to elevate: cannot inspect a source-tree entry "
+            f"(path unknown: {detail}). Check permissions and ownership "
+            "of the source tree, then retry."
+        )
+    location = shlex.quote(str(path))
     if isinstance(detail, OSError) and detail.errno == errno.ENOENT:
         return RunnerError(
             f"Refusing to elevate: cannot inspect {location} ({detail}). "
@@ -318,8 +324,13 @@ def _scan_blocked_error(path: object, detail: object) -> RunnerError:
     )
 
 
-def _entry_is_dangling_symlink(entry: Path) -> bool:
-    """Return whether *entry* is a symlink whose target cannot be statted."""
+def _entry_is_symlink(entry: Path) -> bool:
+    """Return whether *entry* is a symlink; never raises.
+
+    Only meaningful after a failed stat: it distinguishes a dangling
+    symlink (refuse — it could be swapped for a writable target) from a
+    plain vanished entry (skip — it cannot hide a module).
+    """
     try:
         return stat.S_ISLNK(os.lstat(entry).st_mode)
     except OSError:
@@ -362,7 +373,7 @@ def _check_files_writable(dirpath: Path, filenames: list[str]) -> None:
         except OSError as exc:
             # A non-symlink that vanished mid-scan (e.g. a purged cache)
             # cannot hide a module; only dangling symlinks refuse.
-            if exc.errno == errno.ENOENT and not _entry_is_dangling_symlink(entry):
+            if exc.errno == errno.ENOENT and not _entry_is_symlink(entry):
                 continue
             raise _scan_blocked_error(entry, exc) from exc
         if mode & 0o022:
@@ -377,9 +388,18 @@ def _check_unclassified_entry(entry: Path) -> None:
     try:
         mode = os.lstat(entry).st_mode
     except OSError as exc:
+        # Mirror the module branch: a non-symlink that vanished between
+        # scandir and lstat cannot hide anything; dangling symlinks refuse.
+        if exc.errno == errno.ENOENT and not _entry_is_symlink(entry):
+            return
         raise _scan_blocked_error(entry, exc) from exc
     if stat.S_ISDIR(mode):
-        raise _scan_blocked_error(entry, "directory was not scanned")
+        raise RunnerError(
+            f"Refusing to elevate: {shlex.quote(str(entry))} is a directory "
+            "the scan did not descend into. Re-run Mount once (a transient "
+            "listing race usually clears); if it persists, check that "
+            "directory's permissions."
+        )
 
 
 def _is_system_managed_install(src_root: Path) -> bool:

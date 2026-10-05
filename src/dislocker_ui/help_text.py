@@ -46,10 +46,11 @@ sessions itself). On older releases, first confirm nothing
 is still mounted or attached (mount | grep -E
 'DislockerUI|dislocker-ui'; hdiutil info), then:
 sudo rm "/var/root/Library/Application Support/dislocker-ui/active_session.json"
-($HOME instead of /var/root if your sudo preserves it;
+(use your own $HOME instead of /var/root if your sudo preserves it;
 sudo rm "/var/db/dislocker-ui/$(id -u)/active_session.json"
 for the admin-prompt path).
-"Missing required tools": run sudo scripts/install-root-deps.sh,
+"Missing required tools": install per the README (Homebrew tap),
+then run sudo scripts/install-root-deps.sh from the repo root,
 then Recheck deps.
 "NTFS volume requires ntfs-3g": FAT/ExFAT works without it.
 macFUSE not approved: approval appears the first time you
@@ -61,6 +62,10 @@ mbedtls@3 and re-create the libmbedcrypto symlink (see the
 README install section); re-run it after each upgrade.
 Cannot open the disk: launch with sudo ./run.sh — an
 unprivileged GUI is blocked by macOS TCC.
+"Refusing to elevate: cannot inspect ...": usually a
+root-owned or unreadable file under src/ (e.g. a __pycache__
+left by an earlier sudo ./run.sh). Follow the printed
+hint, or launch with sudo ./run.sh instead.
 """
 
 

@@ -41,9 +41,10 @@ def test_scan_rejects_directory_walk_failed_to_classify(tmp_path: Path) -> None:
 
     with (
         patch("dislocker_ui.elevate.os.walk", _walk),
-        pytest.raises(RunnerError, match="directory was not scanned"),
+        pytest.raises(RunnerError, match="did not descend into") as excinfo,
     ):
         _assert_no_writable_py_files(src)
+    assert "Re-run Mount once" in str(excinfo.value)
 
 
 def test_scan_rejects_unstatable_non_module_entry(tmp_path: Path) -> None:
@@ -68,6 +69,31 @@ def test_scan_accepts_plain_non_module_files(tmp_path: Path) -> None:
     _assert_no_writable_py_files(_tree(tmp_path))
 
 
+def test_scan_skips_vanished_unclassified_entry(tmp_path: Path) -> None:
+    """A non-module entry deleted between scandir and lstat is skipped."""
+    src = _tree(tmp_path)
+    target = src / "pkg" / "README.txt"
+    real_lstat = os.lstat
+
+    def _lstat(path: object, *args: object, **kwargs: object) -> os.stat_result:
+        if str(path) == str(target):
+            raise FileNotFoundError(2, "No such file or directory", str(path))
+        return real_lstat(path, *args, **kwargs)  # type: ignore[arg-type]
+
+    with patch("dislocker_ui.elevate.os.lstat", _lstat):
+        _assert_no_writable_py_files(src)
+
+
+def test_scan_blocked_error_without_path_has_no_command() -> None:
+    """An unknown scan path explains itself without a copy-paste command."""
+    from dislocker_ui.elevate import _scan_blocked_error
+
+    message = str(_scan_blocked_error(None, OSError("cannot list")))
+    assert "unknown" in message
+    assert "rm <unknown>" not in message
+    assert "chown" not in message
+
+
 def test_scan_skips_vanished_non_symlink_module(tmp_path: Path) -> None:
     """A regular .py deleted mid-scan cannot hide a module; it is skipped."""
     pkg = tmp_path / "pkg"
@@ -87,7 +113,6 @@ def test_scan_skips_vanished_non_symlink_module(tmp_path: Path) -> None:
 
 def test_scan_hints_quote_paths_with_spaces(tmp_path: Path) -> None:
     """Ownership hints shell-quote paths so they stay copy-pasteable."""
-    from dislocker_ui.elevate import _assert_no_writable_py_files
 
     pkg = tmp_path / "dir with space" / "pkg"
     pkg.mkdir(parents=True)
@@ -100,8 +125,6 @@ def test_scan_hints_quote_paths_with_spaces(tmp_path: Path) -> None:
 
 
 def test_assert_no_writable_py_files_ok(tmp_path: Path) -> None:
-    from dislocker_ui.elevate import _assert_no_writable_py_files
-
     pkg = tmp_path / "pkg"
     pkg.mkdir()
     ok = pkg / "mod.py"
@@ -111,8 +134,6 @@ def test_assert_no_writable_py_files_ok(tmp_path: Path) -> None:
 
 
 def test_assert_no_writable_py_files_group_writable(tmp_path: Path) -> None:
-    from dislocker_ui.elevate import _assert_no_writable_py_files
-
     pkg = tmp_path / "pkg"
     pkg.mkdir()
     bad = pkg / "mod.py"
@@ -123,8 +144,6 @@ def test_assert_no_writable_py_files_group_writable(tmp_path: Path) -> None:
 
 
 def test_assert_no_writable_py_files_world_writable(tmp_path: Path) -> None:
-    from dislocker_ui.elevate import _assert_no_writable_py_files
-
     pkg = tmp_path / "pkg"
     pkg.mkdir()
     bad = pkg / "mod.py"
@@ -135,8 +154,6 @@ def test_assert_no_writable_py_files_world_writable(tmp_path: Path) -> None:
 
 
 def test_assert_no_writable_py_files_skips_non_py(tmp_path: Path) -> None:
-    from dislocker_ui.elevate import _assert_no_writable_py_files
-
     pkg = tmp_path / "pkg"
     pkg.mkdir()
     non_py = pkg / "data.txt"
@@ -146,8 +163,6 @@ def test_assert_no_writable_py_files_skips_non_py(tmp_path: Path) -> None:
 
 
 def test_assert_no_writable_py_files_error_includes_path(tmp_path: Path) -> None:
-    from dislocker_ui.elevate import _assert_no_writable_py_files
-
     pkg = tmp_path / "pkg"
     pkg.mkdir()
     bad = pkg / "mod.py"
@@ -158,8 +173,6 @@ def test_assert_no_writable_py_files_error_includes_path(tmp_path: Path) -> None
 
 
 def test_assert_no_writable_py_files_scans_subdirectories(tmp_path: Path) -> None:
-    from dislocker_ui.elevate import _assert_no_writable_py_files
-
     root = tmp_path / "src"
     sub = root / "dislocker_ui"
     sub.mkdir(parents=True)
@@ -172,7 +185,6 @@ def test_assert_no_writable_py_files_scans_subdirectories(tmp_path: Path) -> Non
 
 def test_assert_no_writable_py_files_unreadable_dir_raises(tmp_path: Path) -> None:
     """An unreadable subdirectory fails the scan instead of being skipped."""
-    from dislocker_ui.elevate import _assert_no_writable_py_files
 
     pkg = tmp_path / "pkg"
     locked = pkg / "locked"
@@ -224,7 +236,6 @@ def test_assert_no_writable_py_files_pruned_dirs_skipped_even_unreadable(
     tmp_path: Path,
 ) -> None:
     """Pruned cache dirs are never descended into, unreadable or not."""
-    from dislocker_ui.elevate import _assert_no_writable_py_files
 
     pkg = tmp_path / "pkg"
     cache = pkg / ".git"
@@ -247,8 +258,6 @@ def test_assert_no_writable_py_files_skips_root_owned_system_managed(
     """Root-owned site-packages / dist-packages is exempt from the scan."""
     from unittest.mock import patch
 
-    from dislocker_ui.elevate import _assert_no_writable_py_files
-
     root = tmp_path / dirname
     root.mkdir()
     bad = root / "mod.py"
@@ -263,7 +272,6 @@ def test_assert_no_writable_py_files_scans_user_owned_system_named_dir(
     tmp_path: Path, dirname: str
 ) -> None:
     """User-owned directory merely named site-packages is NOT exempt."""
-    from dislocker_ui.elevate import _assert_no_writable_py_files
 
     root = tmp_path / dirname
     root.mkdir()
@@ -275,8 +283,6 @@ def test_assert_no_writable_py_files_scans_user_owned_system_named_dir(
 
 
 def test_assert_no_writable_py_files_rejects_writable_directory(tmp_path: Path) -> None:
-    from dislocker_ui.elevate import _assert_no_writable_py_files
-
     root = tmp_path / "src"
     sub = root / "pkg"
     sub.mkdir(parents=True)
@@ -289,8 +295,6 @@ def test_assert_no_writable_py_files_rejects_writable_directory(tmp_path: Path) 
 
 
 def test_assert_no_writable_py_files_rejects_writable_pyc(tmp_path: Path) -> None:
-    from dislocker_ui.elevate import _assert_no_writable_py_files
-
     root = tmp_path / "pkg"
     root.mkdir()
     bad = root / "mod.pyc"
@@ -301,8 +305,6 @@ def test_assert_no_writable_py_files_rejects_writable_pyc(tmp_path: Path) -> Non
 
 
 def test_assert_no_writable_py_files_rejects_writable_pycache(tmp_path: Path) -> None:
-    from dislocker_ui.elevate import _assert_no_writable_py_files
-
     root = tmp_path / "pkg"
     cache = root / "__pycache__"
     cache.mkdir(parents=True)
@@ -312,8 +314,6 @@ def test_assert_no_writable_py_files_rejects_writable_pycache(tmp_path: Path) ->
 
 
 def test_assert_no_writable_py_files_rejects_writable_so(tmp_path: Path) -> None:
-    from dislocker_ui.elevate import _assert_no_writable_py_files
-
     root = tmp_path / "pkg"
     root.mkdir()
     bad = root / "native.so"
@@ -325,7 +325,6 @@ def test_assert_no_writable_py_files_rejects_writable_so(tmp_path: Path) -> None
 
 def test_assert_no_writable_py_files_refuses_broken_symlink(tmp_path: Path) -> None:
     """A broken symlink (target deleted) is refused with a removal hint."""
-    from dislocker_ui.elevate import _assert_no_writable_py_files
 
     root = tmp_path / "pkg"
     root.mkdir()
@@ -351,8 +350,6 @@ def test_assert_no_writable_py_files_refuses_broken_symlink(tmp_path: Path) -> N
     ],
 )
 def test_assert_no_writable_py_files_skips_non_code_dirs(tmp_path: Path, dirname: str) -> None:
-    from dislocker_ui.elevate import _assert_no_writable_py_files
-
     root = tmp_path / "src"
     d = root / dirname
     d.mkdir(parents=True)
@@ -367,7 +364,6 @@ def test_assert_no_writable_py_files_prunes_excluded_dir_descendants(
     tmp_path: Path,
 ) -> None:
     """Writable files inside an excluded directory (.git) are not checked."""
-    from dislocker_ui.elevate import _assert_no_writable_py_files
 
     root = tmp_path / "src"
     git_dir = root / ".git" / "objects"

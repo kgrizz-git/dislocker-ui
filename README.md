@@ -222,9 +222,10 @@ A condensed version of this list is in the app under Help → Troubleshooting.
   (use your own `$HOME` instead of `/var/root` if your sudo preserves it), or
   `sudo rm "/var/db/dislocker-ui/$(id -u)/active_session.json"` (admin-prompt path).
   Leftover empty `/Volumes/DislockerUI*` dirs are harmless; remove extras with `sudo rmdir`.
-- **"Missing required tools"** — run the one-time root install
-  (Installation, section 4): `sudo scripts/install-root-deps.sh`,
-  then click **Recheck deps** in the app.
+- **"Missing required tools"** — install per Installation, section 3
+  (Homebrew tap; satisfies the GUI check), then run the one-time root
+  install from the repo root (section 4):
+  `sudo scripts/install-root-deps.sh`, then click **Recheck deps**.
 - **"NTFS volume requires ntfs-3g"** — install it per Installation
   sections 3–4. FAT/ExFAT BitLocker To Go volumes mount with the
   system `mount_msdos` / `mount_exfat` helpers and don't need it.
@@ -240,6 +241,10 @@ A condensed version of this list is in the app under Help → Troubleshooting.
   needs to open removable `/dev/disk*`, which macOS TCC blocks for
   an unprivileged GUI and its administrator-prompt child. Launch
   with `sudo ./run.sh`. Without sudo the app cannot complete a mount.
+- **"Refusing to elevate: cannot inspect …"** — usually a root-owned
+  or unreadable file under `src/` (e.g. a `__pycache__` left by an
+  earlier `sudo ./run.sh`). Follow the printed hint, or launch with
+  `sudo ./run.sh` instead.
 
 ## Layout
 

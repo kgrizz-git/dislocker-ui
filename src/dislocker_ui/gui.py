@@ -178,6 +178,7 @@ class DislockerApp(ttk.Frame):
             command=lambda: self._show_help_text("Troubleshooting", help_text.TROUBLESHOOTING_TEXT),
         )
         menubar.add_cascade(label="Help", menu=help_menu)
+        # Same as configure(menu=...); item assignment avoids a Sonar S930 false positive.
         self.master["menu"] = menubar
 
     def _show_about(self) -> None:

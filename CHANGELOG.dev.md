@@ -21,8 +21,9 @@ Version numbers match `VERSION` / SemVer with the public changelog.
   (with an ownership-fix hint) instead of being skipped.
 - Scan hardening follow-ups: an `os.walk` misclassification guard fails
   the scan when a skipped directory masquerades as a file list entry;
-  scan tests live in `tests/test_elevate_scan.py` (moved out of
-  `tests/test_elevate.py`).
+   scan tests live in `tests/test_elevate_scan.py` (moved out of
+   `tests/test_elevate.py`).
+
 ## [0.5.3] - 2026-10-03
 
 ### Changed
