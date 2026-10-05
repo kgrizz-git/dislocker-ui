@@ -28,7 +28,12 @@ import pytest
 from dislocker_ui.deps import DepsStatus
 from dislocker_ui.runner import RunnerError, unmount_volume
 from dislocker_ui.session import MountSession, load_session, save_session
-from dislocker_ui.unmount_steps import _is_mounted, _mount_table, session_looks_stale
+from dislocker_ui.unmount_steps import (
+    _is_mounted,
+    _mount_table,
+    _unmount_fuse,
+    session_looks_stale,
+)
 
 _NTFS_MOUNT = "/Volumes/DislockerUI-stale-probe"
 _UMOUNT = "/bin/umount"
@@ -474,3 +479,14 @@ def test_unmount_stops_before_detach_when_volume_unmount_fails(tmp_path: Path) -
     attempted = [c.args[0] for c in run.call_args_list]
     assert not any("detach" in cmd for cmd in attempted)
     assert [_UMOUNT, session.fuse_mount] not in attempted
+
+
+def test_unmount_fuse_refuses_when_mount_table_unreadable(tmp_path: Path) -> None:
+    """The FUSE step never runs umount without a readable mount table."""
+    session = _session(fuse_mount=str(tmp_path / "dislocker-ui-x"))
+    run = _mount_responder(mount_rc=1)
+    with patch("dislocker_ui.unmount_steps.subprocess.run", run):
+        errors = _unmount_fuse(_deps(), session, lambda _m: None, session_path=tmp_path / "s.json")
+    assert errors
+    assert "Could not read the mount table" in errors[0]
+    assert [c for c in run.call_args_list if c.args[0][0] == _UMOUNT] == []

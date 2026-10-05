@@ -383,9 +383,18 @@ def _detach_raw_disk(
     )
 
 
-def _unmount_fuse(deps: DepsStatus, session: MountSession, log: LogFn) -> list[str]:
-    """Unmount the dislocker FUSE mount point."""
-    if not _is_mounted(session.fuse_mount):
+def _unmount_fuse(
+    deps: DepsStatus, session: MountSession, log: LogFn, *, session_path: Path | None = None
+) -> list[str]:
+    """Unmount the dislocker FUSE mount point once the table confirms it."""
+    table = _mount_table()
+    if table is None:
+        log(f"Could not read the mount table; not unmounting {session.fuse_mount}")
+        return [
+            f"Could not read the mount table to verify {session.fuse_mount}; "
+            "not unmounting. " + manual_session_cleanup_hint(session_path)
+        ]
+    if _mount_key(table, session.fuse_mount) is None:
         log(f"already unmounted: {session.fuse_mount}")
         return []
     log(f"Unmounting FUSE at {session.fuse_mount}…")

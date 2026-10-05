@@ -307,7 +307,7 @@ def unmount_volume(
         # never detach its image or unmount the FUSE layer underneath it.
         raise RunnerError("Unmount incomplete; state was retained for retry:\n" + "\n".join(errors))
     errors.extend(_detach_raw_disk(deps, session, log, session_path=canonical_path, images=images))
-    errors.extend(_unmount_fuse(deps, session, log))
+    errors.extend(_unmount_fuse(deps, session, log, session_path=canonical_path))
     if not errors:
         errors.extend(
             _remove_fuse_dir(
