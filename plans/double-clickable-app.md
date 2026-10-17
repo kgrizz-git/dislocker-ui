@@ -1,9 +1,11 @@
 # Double-clickable launch for dislocker-ui
 
-Status: **active** — findings complete; three independent model reviews on
-2026-10-17 (two free-tier, plus Claude Opus 5.5 via the claude CLI) all
-returned approve-with-changes, and their findings are folded in below;
-implementation not started
+Status: **active** — implementation shipped as 0.7.0 on branch
+`double-clickable-app` (launcher + docs + release notes); manual
+verification (BitLocker drive) still open. Three independent model
+reviews on 2026-10-17 (two free-tier, plus Claude Opus 5.5 via the
+claude CLI) plus per-chunk reviews returned approve-with-changes and
+their findings are folded in below.
 
 Goal: a double-clickable way to launch the GUI on macOS, despite the sudo
 requirement, without weakening the existing root-launch security model.
@@ -136,7 +138,7 @@ Name: `dislocker-ui.command` at the repo root (next to `run.sh`).
       shebang is — so the exec bit and shebang are what make the hook
       see the file; the static test's direct shellcheck call is the
       belt-and-braces gate. Sketch verified clean in bash dialect.
-- [ ] README: document double-click launch in the run section — password
+- [x] README: document double-click launch in the run section — password
       prompt appears in Terminal; **keep the Terminal window open while
       the app runs** (closing it SIGHUPs the GUI); `sudo ./run.sh` stays
       as the documented power-user equivalent; list the file in the
@@ -152,7 +154,7 @@ Name: `dislocker-ui.command` at the repo root (next to `run.sh`).
       EPERM under sudo, allow Terminal under Privacy & Security →
       Removable Volumes (or Full Disk Access) — the sudo path rides on
       Terminal's own removable-volume consent."
-- [ ] Help menu (`help_text.py`): extend `USAGE_TEXT` step 1 to name
+- [x] Help menu (`help_text.py`): extend `USAGE_TEXT` step 1 to name
       both launch paths, observing the test constraints — lines wrap at
       72 columns (only `sudo `-prefixed lines are exempt), the literal
       fragment `sudo ./run.sh` must survive
@@ -164,11 +166,13 @@ Name: `dislocker-ui.command` at the repo root (next to `run.sh`).
       Add a test asserting "dislocker-ui.command" appears in
       `USAGE_TEXT`. Also mention the `.command` in the AGENTS.md
       "Commands" launch line.
-- [ ] Ship as **0.7.0** (`### Added` entry): bump `VERSION`, add the
+- [x] Ship as **0.7.0** (`### Added` entry): bump `VERSION`, add the
       `CHANGELOG.md` entry, note any harness-only changes (e.g. the new
       static test) in `CHANGELOG.dev.md`, and archive this plan per the
       plans workflow — including removing this plan's entry from
-      `plans/README.md` "Active plans".
+      `plans/README.md` "Active plans" (archiving deferred until the
+      manual-verification item below completes; `TO_DO.md` carries it
+      until then).
 - [ ] Manual verification (needs a real BitLocker drive): double-click →
       password in Terminal → GUI opens → Mount completes and files are
       readable. Then close Terminal **with a volume mounted** (the

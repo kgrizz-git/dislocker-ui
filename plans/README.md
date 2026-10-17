@@ -28,4 +28,5 @@ Tracked implementation plans for **dislocker-ui**.
 ## Active plans
 
 - [`double-clickable-app.md`](double-clickable-app.md) — `.command`
-  Terminal-attached launcher (findings complete, implementation pending).
+  Terminal-attached launcher (shipped in 0.7.0; manual verification
+  pending).
