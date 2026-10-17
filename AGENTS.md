@@ -121,9 +121,10 @@ Public contribution posture: Issues welcome; PRs may be limited to collaborators
 ## Security / privileges
 
 Mounting BitLocker volumes needs elevated rights to open `/dev/disk*`. On Darwin
-launch with ``sudo ./run.sh`` so the GUI is already root and runs the mount
-pipeline in-process (macOS TCC blocks the unprivileged osascript-elevated path
-from opening removable disks). Do not weaken trust checks by copying volume
+launch with ``sudo ./run.sh`` (or double-click `dislocker-ui.command`) so the
+GUI is already root and runs the mount pipeline in-process (macOS TCC blocks
+the unprivileged osascript-elevated path from opening removable disks). Do
+not weaken trust checks by copying volume
 contents into world-readable temp files unless the user asks for a decrypt-to-file
 feature. Never commit passwords, recovery keys, `.bek` files, or session dumps
 with secrets. BitLocker secrets may still appear briefly on `dislocker-fuse`

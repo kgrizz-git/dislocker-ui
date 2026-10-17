@@ -22,11 +22,12 @@ Terminal and asks for the admin password there — or launch with
 **`sudo ./run.sh`**. The GUI then runs already-root and mounts in-process
 (no osascript administrator dialog). An unprivileged GUI cannot open
 removable `/dev/disk*` under TCC, so non-sudo launches cannot complete a
-useful mount. A double-clickable `.app` is not possible: macOS TCC gates
-removable device opens on the responsible process, and an osascript-elevated
+useful mount. A double-clickable `.app` is not possible: the TCC gate on
+removable device opens keys on launch context, not uid — an osascript-elevated
 child of a `.app` is silently denied even as root, even with Full Disk Access
 granted to the `.app` (measured 2026-10-17; see
-[`plans/double-clickable-app.md`](plans/double-clickable-app.md)).
+[`plans/double-clickable-app.md`](plans/double-clickable-app.md)). Keep the
+Terminal window open while the app runs — closing it ends the app.
 
 `run.sh` executes the **checkout** as root (`PYTHONPATH=…/src`). Keep the repo
 owned by you and not group-/world-writable; do not `sudo` a shared or untrusted
