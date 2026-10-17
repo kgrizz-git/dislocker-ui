@@ -168,11 +168,7 @@ Name: `dislocker-ui.command` at the repo root (next to `run.sh`).
       "Commands" launch line.
 - [x] Ship as **0.7.0** (`### Added` entry): bump `VERSION`, add the
       `CHANGELOG.md` entry, note any harness-only changes (e.g. the new
-      static test) in `CHANGELOG.dev.md`, and archive this plan per the
-      plans workflow — including removing this plan's entry from
-      `plans/README.md` "Active plans" (archiving deferred until the
-      manual-verification item below completes; `TO_DO.md` carries it
-      until then).
+      static test) in `CHANGELOG.dev.md` (archive step split out below).
 - [ ] Manual verification (needs a real BitLocker drive): double-click →
       password in Terminal → GUI opens → Mount completes and files are
       readable. Then close Terminal **with a volume mounted** (the
@@ -182,6 +178,10 @@ Name: `dislocker-ui.command` at the repo root (next to `run.sh`).
       through the stale-session self-heal path with no eject of
       unrelated disks. If close misbehaves, add a `trap` in the wrapper
       or a SIGHUP handler in `__main__.py` and re-verify.
+- [ ] Archive this plan per the plans workflow — move it to
+      `plans/archive/` (date-prefixed) and remove its entry from
+      `plans/README.md` "Active plans" and from `TO_DO.md` — once the
+      manual verification above passes.
 
 ## Non-goals
 

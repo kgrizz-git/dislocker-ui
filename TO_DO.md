@@ -18,7 +18,6 @@ Open work only for **dislocker-ui**.
   a BitLocker volume, then close Terminal with the volume mounted and
   confirm the GUI exits cleanly and the next launch self-heals (see the
   plan's manual-verification checklist item).
-
 - Stale-session fix (0.5.3, [archived plan](plans/archive/2026-10-03-stale-session-unmount.md)):
   manual verification only — mount a BitLocker volume, reboot, launch, and
   confirm Mount self-heals (or Unmount clears) with no eject of unrelated
