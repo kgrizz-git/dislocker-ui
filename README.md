@@ -17,10 +17,16 @@ Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
    for NTFS, system **mount_msdos** / **mount_exfat** for BitLocker To Go FAT/ExFAT.
 3. Unmount cleanly (volume → detach raw disk → unmount FUSE).
 
-On modern macOS, launch with **`sudo ./run.sh`**. The GUI then runs already-root
-and mounts in-process (no osascript administrator dialog). An unprivileged
-GUI cannot open removable `/dev/disk*` under TCC, so non-sudo launches cannot
-complete a useful mount.
+On modern macOS, double-click **`dislocker-ui.command`** — Finder opens
+Terminal and asks for the admin password there — or launch with
+**`sudo ./run.sh`**. The GUI then runs already-root and mounts in-process
+(no osascript administrator dialog). An unprivileged GUI cannot open
+removable `/dev/disk*` under TCC, so non-sudo launches cannot complete a
+useful mount. A double-clickable `.app` is not possible: macOS TCC gates
+removable device opens on the responsible process, and an osascript-elevated
+child of a `.app` is silently denied even as root, even with Full Disk Access
+granted to the `.app` (measured 2026-10-17; see
+[`plans/double-clickable-app.md`](plans/double-clickable-app.md)).
 
 `run.sh` executes the **checkout** as root (`PYTHONPATH=…/src`). Keep the repo
 owned by you and not group-/world-writable; do not `sudo` a shared or untrusted
@@ -146,22 +152,33 @@ sudo scripts/install-root-deps.sh          # or: --prefix /usr/local
 
 ```bash
 cd /path/to/dislocker-ui
-chmod +x run.sh   # once
+chmod +x run.sh dislocker-ui.command   # once
 ```
 
 No Python packages beyond the stdlib (tkinter) are required.
 
+Downloaded a zip? The first launch may be blocked by Gatekeeper. Use
+System Settings → Privacy & Security → **Open Anyway**, or run
+`xattr -d com.apple.quarantine dislocker-ui.command`. Git clones are not
+quarantined.
+
 ## Usage
 
 1. Plug in / attach the BitLocker disk.
-2. Launch the UI **with sudo** (required so mounts can open removable
-   `/dev/disk*` under macOS TCC; an unprivileged GUI cannot complete a useful
-   mount):
+2. Launch the UI (double-click `dislocker-ui.command` — Finder opens
+   Terminal for the admin password — or run `sudo ./run.sh`; sudo is
+   required so mounts can open removable `/dev/disk*` under macOS TCC;
+   an unprivileged GUI cannot complete a useful mount):
 
 ```bash
 cd /path/to/dislocker-ui
-sudo ./run.sh
+sudo ./run.sh        # or double-click dislocker-ui.command in Finder
 ```
+
+Keep the Terminal window open while the app runs — closing it ends the
+app (the removable-volume consent that makes mounts work rides on
+Terminal). If mounts fail with EPERM under sudo, allow Terminal under
+Privacy & Security → Removable Volumes (or Full Disk Access).
 
 `SUDO_UID` / `SUDO_GID` are preserved so mounted files are owned by your user,
 not root. Running `python3 -m dislocker_ui` without sudo is unsupported for
@@ -259,6 +276,7 @@ CHANGELOG.dev.md    # harness / CI / docs-only notes
 tmp/                # local scratch (gitignored)
 .context/           # disposable agent scratch (gitignored)
 run.sh              # launcher
+dislocker-ui.command  # double-clickable launcher (Finder → Terminal → sudo)
 pyproject.toml      # packaging + Ruff config
 .pre-commit-config.yaml  # optional local hooks (incl. pre-push)
 hooks/              # local policy scripts (absolute-path / line-count)

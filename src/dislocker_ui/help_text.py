@@ -31,7 +31,9 @@ License: GPL-3.0-or-later.
 """
 
 USAGE_TEXT = """Usage
-1. Launch with: sudo ./run.sh
+1. Launch by double-clicking dislocker-ui.command
+   (Finder opens Terminal for the password prompt),
+   or run sudo ./run.sh in Terminal.
 2. Select a volume (or type /dev/diskXsY).
 3. Choose the unlock method and enter the secret.
 4. Leave Read-only checked unless you need writes.

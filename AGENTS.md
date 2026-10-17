@@ -73,6 +73,8 @@ Workflow for agents:
 ## Commands
 
 ```bash
+# Double-click dislocker-ui.command in Finder (Terminal opens; sudo
+# prompts there), or from the repo root:
 sudo ./run.sh
 # or: sudo env PYTHONPATH=src python3 -m dislocker_ui
 python3 -m compileall -q src
