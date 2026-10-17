@@ -83,25 +83,28 @@ Terminal opens → user types the admin password → `sudo` runs the existing
 documented flow. All root-side hardening stays in `run.sh`; the
 `.command` is a thin unprivileged wrapper.
 
-Design sketch (final shape at implementation time):
+Design sketch (shipped form; `readlink` resolution and the `-f` guard
+were added in review — a symlink named like the launcher plus a planted
+executable `run.sh` must never reach sudo):
 
 ```bash
 #!/usr/bin/env bash
-# Double-clickable launcher: Finder opens this in Terminal; sudo prompts there.
 set -euo pipefail
-# ROOT comes from $0, not cwd: Terminal runs a .command via the user's
-# login shell ("path ; exit") with cwd=$HOME, so the repo must not be
-# found via cwd or $PATH. Keep the .command a real file at the repo
-# root — invoked through a symlink, $0 is the link and ROOT would point
-# at the wrong tree. /usr/bin/sudo is absolute because login-shell PATH
-# is not guaranteed under every launcher.
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-if [ ! -x "$ROOT/run.sh" ]; then
+SELF="$0"
+# readlink -f is macOS 12.3+; older systems fall back to $0 itself.
+if _resolved="$(readlink -f "$SELF" 2>/dev/null)"; then
+  SELF="$_resolved"
+fi
+ROOT="$(cd "$(dirname "$SELF")" && pwd)" || {
+  echo "dislocker-ui: cannot resolve $(dirname "$SELF")" >&2
+  exit 1
+}
+if [ ! -f "$ROOT/run.sh" ] || [ ! -x "$ROOT/run.sh" ]; then
   echo "dislocker-ui: $ROOT/run.sh is missing or not executable" >&2
   exit 1
 fi
 if [ "$(id -u)" -eq 0 ]; then
-  exec "$ROOT/run.sh" "$@"   # already root
+  exec "$ROOT/run.sh" "$@"   # already root (relaunched via sudo)
 fi
 exec /usr/bin/sudo "$ROOT/run.sh" "$@"
 ```
@@ -110,13 +113,14 @@ Name: `dislocker-ui.command` at the repo root (next to `run.sh`).
 
 ## Checklist
 
-- [ ] Add `dislocker-ui.command` (thin wrapper as above; the `-x` guard is
-      the only pre-sudo logic — nothing in it runs privileged, `run.sh`
-      re-validates everything).
-- [ ] Commit the executable bit: `chmod +x dislocker-ui.command`
+- [x] Add `dislocker-ui.command` (thin wrapper; the symlink resolution,
+      ROOT-failure diagnostic, and `-x`/`-f` guard are the only pre-sudo
+      logic — nothing in it runs privileged, `run.sh` re-validates
+      everything).
+- [x] Commit the executable bit: `chmod +x dislocker-ui.command`
       **before** `git add` (git records the mode at add time); verify
       `git ls-files -s` shows `100755`.
-- [ ] Tests: `tests/test_command_launcher_static.py`, modeled on
+- [x] Tests: `tests/test_command_launcher_static.py`, modeled on
       `tests/test_run_script_static.py` — `bash -n` syntax gate; direct
       `shellcheck` call (CI never runs shellcheck); wrapper exits 1 with
       the "missing or not executable" message when `run.sh` is
@@ -126,7 +130,7 @@ Name: `dislocker-ui.command` at the repo root (next to `run.sh`).
       0644 stub — never where a real executable `run.sh` exists: CI
       runners have passwordless sudo and would really exec the root
       launcher.
-- [ ] Lint gates: passes `bash -n` and `shellcheck`. The pre-commit
+- [x] Lint gates: passes `bash -n` and `shellcheck`. The pre-commit
       shellcheck-py hook filters on the `shell` tag — a `.command`
       extension is not auto-tagged, but an executable file with a bash
       shebang is — so the exec bit and shebang are what make the hook

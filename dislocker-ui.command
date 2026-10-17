@@ -8,22 +8,33 @@
 # everything once it runs as root.
 #
 # Invariants:
-#   - Resolve ROOT from $0, never cwd or $PATH (Terminal starts us in
-#     $HOME). Keep this a real file at the repo root: invoked through a
-#     symlink, $0 is the link and ROOT would point at the wrong tree.
+#   - Resolve the script's real path (following symlinks) so ROOT is the
+#     true repo root, never cwd or $PATH (Terminal starts us in $HOME).
+#     Without resolution, a symlink named like this file plus a planted
+#     executable run.sh in a user-writable directory would put a
+#     double-click's admin password behind sudo of the planted script.
 #   - /usr/bin/sudo is absolute because login-shell PATH is not
 #     guaranteed under every launcher.
-#   - Why not an .app? macOS TCC gates removable /dev/disk* opens on the
-#     responsible process: an osascript-elevated child of a .app is
-#     severed from the launcher and gets EPERM even as root, even with
-#     Full Disk Access granted to the .app (measured 2026-10-17; see
-#     plans/double-clickable-app.md). Terminal-attached sudo keeps
-#     descent through consent-holding Terminal.
+#   - Why not an .app? Measured 2026-10-17: a root child spawned by
+#     osascript's admin prompt cannot open removable /dev/disk* nodes —
+#     even with Full Disk Access granted to the .app — while sudo in
+#     Terminal opens them all. The severed-descent explanation is the
+#     working hypothesis for that differential (see
+#     plans/double-clickable-app.md). Terminal-attached sudo is the
+#     only viable double-click design.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+SELF="$0"
+# readlink -f is macOS 12.3+; older systems fall back to $0 itself.
+if _resolved="$(readlink -f "$SELF" 2>/dev/null)"; then
+  SELF="$_resolved"
+fi
+ROOT="$(cd "$(dirname "$SELF")" && pwd)" || {
+  echo "dislocker-ui: cannot resolve $(dirname "$SELF")" >&2
+  exit 1
+}
 
-if [ ! -x "$ROOT/run.sh" ]; then
+if [ ! -f "$ROOT/run.sh" ] || [ ! -x "$ROOT/run.sh" ]; then
   echo "dislocker-ui: $ROOT/run.sh is missing or not executable" >&2
   exit 1
 fi
