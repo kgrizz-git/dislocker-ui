@@ -13,6 +13,12 @@ Open work only for **dislocker-ui**.
 
 ## Active
 
+- Double-clickable launch ([plan](plans/double-clickable-app.md)):
+  implement the `.command` Terminal-attached launcher and its docs
+  (README + help_text Usage), ship as 0.7.0. TCC experiments are
+  complete — `.app`+osascript wrapper designs are blocked (see plan
+  findings); `.command` is the chosen design.
+
 - Stale-session fix (0.5.3, [archived plan](plans/archive/2026-10-03-stale-session-unmount.md)):
   manual verification only — mount a BitLocker volume, reboot, launch, and
   confirm Mount self-heals (or Unmount clears) with no eject of unrelated
