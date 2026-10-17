@@ -1,8 +1,9 @@
 # Double-clickable launch for dislocker-ui
 
-Status: **active** — findings complete; two independent model reviews on
-2026-10-17 both returned approve-with-changes, and their findings are
-folded in below; implementation not started
+Status: **active** — findings complete; three independent model reviews on
+2026-10-17 (two free-tier, plus Claude Opus 5.5 via the claude CLI) all
+returned approve-with-changes, and their findings are folded in below;
+implementation not started
 
 Goal: a double-clickable way to launch the GUI on macOS, despite the sudo
 requirement, without weakening the existing root-launch security model.
@@ -26,37 +27,53 @@ nodes). Three launches:
 | 2. Same `.app` **with Full Disk Access granted to the .app** | EPERM ×8 (volume unmounted) | Same mixed pattern |
 | 3. `sudo` in Terminal → root probe | **OK ×8** (volume unmounted) | Same mixed pattern |
 
-Control notes: the internal whole-disk EPERM appears in all three root
-runs *including* the successful Terminal run, so it is a separate
-mechanism (live-system / sealed-volume protection), not the
-removable-volume gate — it is not the TCC signal and does not affect the
-conclusion. An unprivileged control run
-(`tmp/tcc-test/probe-baseline-unprivileged.txt`, recorded **before** the
-USB drive was attached, so it contains no USB data) shows user-owned
-disk-image nodes opening fine while internal nodes fail on plain Unix
-permission bits — useful for telling EPERM sources apart.
+Control notes:
 
-Interpretation:
+- The internal whole-disk EPERM (`disk0`, `disk0s2`, `disk2`, `disk3`)
+  appears in all three root runs *including* the successful Terminal run,
+  so it is a separate mechanism (live-system / sealed-volume protection),
+  not the removable-volume gate. The unprivileged control run
+  (`tmp/tcc-test/probe-baseline-unprivileged.txt`, recorded **before**
+  the USB drive was attached, so it contains no USB data) shows the same
+  nodes failing EPERM on writes even without root (reads fail EACCES on
+  plain Unix perms) — matching the root behavior and strengthening the
+  separate-mechanism reading.
+- diskutil tags the Kiro disk images `removable-media=True`, yet their
+  nodes open fine as root even in the `.app`-spawned run — the TCC gate
+  in play applies to physical external media, not to every node diskutil
+  labels removable.
+- Run 1 was recorded with the USB volume mounted; runs 2 and 3 with it
+  unmounted (mount state is known from the operator log, not captured in
+  the probe files). Runs 2 vs 3 are therefore the clean same-state pair;
+  run 1 is corroborating.
 
-- TCC gates removable-volume device opens even for root; the gate keys on
-  the *responsible process* (launch context), not uid.
-- `do shell script … with administrator privileges` severs process
-  descent: the privileged child is reparented to a system authorization
-  daemon, so the launching `.app` is never in its tree. No privacy grant
-  on the `.app` can apply — run 2 proves the strongest grant (Full Disk
-  Access) does nothing.
-- `sudo` in Terminal keeps the root process a descendant of Terminal,
-  which holds removable-volume consent — run 3 — matching why
-  `sudo ./run.sh` works today.
-- The probe cannot distinguish responsible-process attribution from
-  designated-requirement keying; either mechanism leaves the
-  admin-prompted child holding no consent from the launcher, so the
-  conclusion is robust to that distinction.
+Interpretation (mechanism is hypothesis; the differential outcome is the
+evidence):
+
+- Measured: root-from-`.app`-via-osascript cannot open the physical USB
+  nodes — even with Full Disk Access granted to the `.app` (run 2) —
+  while root-from-Terminal opens all eight (run 3). The gate keys on
+  launch context, not uid.
+- Hypothesis (consistent background knowledge, not directly probed): the
+  osascript admin prompt severs descent — the privileged child is
+  reparented to a system authorization daemon, so the launching `.app`
+  is never the responsible process and no grant on it can apply — while
+  Terminal-launched `sudo` keeps descent through consent-holding
+  Terminal. The probe recorded no ppid/process-tree or TCC-consent data,
+  and cannot distinguish responsible-process attribution from
+  designated-requirement keying — but every candidate mechanism leaves
+  the admin-prompted child without the launcher's consent, so the
+  conclusion is robust to the distinction.
 
 Conclusion: every "`.app` + osascript admin prompt" wrapper design is
-blocked by TCC and cannot be rescued by grants. The only double-clickable
+blocked by TCC and cannot be rescued by grants. The double-clickable
 designs that work are (a) a Terminal-attached launcher, or (b) a signed
 privileged LaunchDaemon (SMAppService) — out of scope per `run.sh`.
+Later polish, not blocked: a plain `.app` whose executable just runs
+`open -a Terminal <repo>/dislocker-ui.command` stays Terminal-attached
+(LaunchServices `open` — no osascript elevation; Terminal remains the
+responsible app) and would add a Dock/Launchpad icon. Optional follow-up
+after the `.command` ships.
 
 ## Decision
 
@@ -72,10 +89,12 @@ Design sketch (final shape at implementation time):
 #!/usr/bin/env bash
 # Double-clickable launcher: Finder opens this in Terminal; sudo prompts there.
 set -euo pipefail
-# ROOT comes from $0, never $PATH: Terminal runs .command files with a
-# minimal environment, and sudo's env_reset strips exports anyway. Keep the
-# .command a real file at the repo root — invoked through a symlink, $0 is
-# the link and ROOT would point at the wrong tree.
+# ROOT comes from $0, not cwd: Terminal runs a .command via the user's
+# login shell ("path ; exit") with cwd=$HOME, so the repo must not be
+# found via cwd or $PATH. Keep the .command a real file at the repo
+# root — invoked through a symlink, $0 is the link and ROOT would point
+# at the wrong tree. /usr/bin/sudo is absolute because login-shell PATH
+# is not guaranteed under every launcher.
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 if [ ! -x "$ROOT/run.sh" ]; then
   echo "dislocker-ui: $ROOT/run.sh is missing or not executable" >&2
@@ -84,7 +103,7 @@ fi
 if [ "$(id -u)" -eq 0 ]; then
   exec "$ROOT/run.sh" "$@"   # already root
 fi
-exec sudo "$ROOT/run.sh" "$@"
+exec /usr/bin/sudo "$ROOT/run.sh" "$@"
 ```
 
 Name: `dislocker-ui.command` at the repo root (next to `run.sh`).
@@ -98,36 +117,62 @@ Name: `dislocker-ui.command` at the repo root (next to `run.sh`).
       **before** `git add` (git records the mode at add time); verify
       `git ls-files -s` shows `100755`.
 - [ ] Tests: `tests/test_command_launcher_static.py`, modeled on
-      `tests/test_run_script_static.py` — `bash -n` syntax gate; wrapper
-      exits 1 with the "missing or not executable" message when `run.sh`
-      is absent/non-executable; exec-bit mode check via `git ls-files -s`.
-- [ ] Lint gates: passes `bash -n` **and** the `shellcheck` pre-commit
-      hook (the hook has no `types` filter, so it runs on the `.command`;
-      the sketch is verified clean in the bash dialect the hook infers
-      from the shebang).
+      `tests/test_run_script_static.py` — `bash -n` syntax gate; direct
+      `shellcheck` call (CI never runs shellcheck); wrapper exits 1 with
+      the "missing or not executable" message when `run.sh` is
+      absent/non-executable; exec-bit mode check via `git ls-files -s`,
+      skipped when `.git` is absent. Guard tests must copy the wrapper
+      into a temp dir *without* `run.sh` and only exercise the guard
+      path — never invoke the wrapper where `run.sh` exists: CI runners
+      have passwordless sudo and would really exec the root launcher.
+- [ ] Lint gates: passes `bash -n` and `shellcheck`. The pre-commit
+      shellcheck-py hook filters on the `shell` tag — a `.command`
+      extension is not auto-tagged, but an executable file with a bash
+      shebang is — so the exec bit and shebang are what make the hook
+      see the file; the static test's direct shellcheck call is the
+      belt-and-braces gate. Sketch verified clean in bash dialect.
 - [ ] README: document double-click launch in the run section — password
-      prompt appears in Terminal; **keep the Terminal window open while the
-      app runs** (closing it SIGHUPs the GUI); `sudo ./run.sh` stays as
-      the documented power-user equivalent. Gatekeeper wording for zip
-      downloads: "If you downloaded a zip, the first launch may be
-      blocked by Gatekeeper. Right-click `dislocker-ui.command` →
-      **Open** → confirm; later launches open normally. Git clones are
-      not quarantined." Also list the file in the README **Layout**
-      section.
-- [ ] Help menu (`help_text.py`): replace `USAGE_TEXT` step 1 with a
-      line naming both launch paths, e.g. "1. Launch by double-clicking
-      `dislocker-ui.command` (Finder opens Terminal for the password
-      prompt), or run `sudo ./run.sh` in Terminal."
+      prompt appears in Terminal; **keep the Terminal window open while
+      the app runs** (closing it SIGHUPs the GUI); `sudo ./run.sh` stays
+      as the documented power-user equivalent; list the file in the
+      README **Layout** section; extend install step 5 to
+      `chmod +x run.sh dislocker-ui.command` (Finder will not run a
+      non-executable `.command`; zip copies may lose the bit).
+      Gatekeeper wording for zip downloads (right-click → Open was
+      removed in macOS 15): "If you downloaded a zip, the first launch
+      may be blocked by Gatekeeper. Use System Settings → Privacy &
+      Security → **Open Anyway**, or run
+      `xattr -d com.apple.quarantine dislocker-ui.command`. Git clones
+      are not quarantined." Troubleshooting line: "If mounts fail with
+      EPERM under sudo, allow Terminal under Privacy & Security →
+      Removable Volumes (or Full Disk Access) — the sudo path rides on
+      Terminal's own removable-volume consent."
+- [ ] Help menu (`help_text.py`): extend `USAGE_TEXT` step 1 to name
+      both launch paths, observing the test constraints — lines wrap at
+      72 columns (only `sudo `-prefixed lines are exempt), the literal
+      fragment `sudo ./run.sh` must survive
+      (`test_usage_text_covers_mount_flow`), and no backticks (Tk
+      renders them literally), e.g.:
+      "1. Launch by double-clicking dislocker-ui.command"
+      "(Finder opens Terminal for the password prompt),"
+      "or run sudo ./run.sh in Terminal."
+      Add a test asserting "dislocker-ui.command" appears in
+      `USAGE_TEXT`. Also mention the `.command` in the AGENTS.md
+      "Commands" launch line.
 - [ ] Ship as **0.7.0** (`### Added` entry): bump `VERSION`, add the
       `CHANGELOG.md` entry, note any harness-only changes (e.g. the new
       static test) in `CHANGELOG.dev.md`, and archive this plan per the
-      plans workflow.
+      plans workflow — including removing this plan's entry from
+      `plans/README.md` "Active plans".
 - [ ] Manual verification (needs a real BitLocker drive): double-click →
       password in Terminal → GUI opens → Mount completes and files are
-      readable; closing Terminal while running exits the GUI **cleanly**
-      (process gone promptly; no zombie, no hang). If it misbehaves, add
-      a `trap` in the wrapper or a SIGHUP handler in `__main__.py` and
-      re-verify.
+      readable. Then close Terminal **with a volume mounted** (the
+      realistic user action; expect Terminal's "terminate running
+      processes?" warning): the GUI must exit **cleanly** (process gone
+      promptly; no zombie, no hang), and the *next* launch must recover
+      through the stale-session self-heal path with no eject of
+      unrelated disks. If close misbehaves, add a `trap` in the wrapper
+      or a SIGHUP handler in `__main__.py` and re-verify.
 
 ## Non-goals
 
@@ -152,7 +197,10 @@ Name: `dislocker-ui.command` at the repo root (next to `run.sh`).
   (`sudo -b`) trades away stdout visibility and clean shutdown — deferred
   unless the window proves annoying in practice. If manual verification
   shows an unclean exit on close, a wrapper `trap` or a SIGHUP handler in
-  `__main__.py` is the sanctioned fix.
+  `__main__.py` is the sanctioned fix. Caveat: Terminal's own
+  removable-volume consent was never audited on this machine (TCC.db is
+  unreadable); a fresh Mac may need the Privacy & Security grant before
+  the sudo path works — covered by the README troubleshooting line.
 - `.command` files run with a minimal environment and `sudo` resets the
   environment (`env_reset`); the wrapper must resolve `run.sh` relative
   to itself, never via `$PATH` or inherited exports. `run.sh` sets its
