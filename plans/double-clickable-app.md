@@ -121,10 +121,11 @@ Name: `dislocker-ui.command` at the repo root (next to `run.sh`).
       `shellcheck` call (CI never runs shellcheck); wrapper exits 1 with
       the "missing or not executable" message when `run.sh` is
       absent/non-executable; exec-bit mode check via `git ls-files -s`,
-      skipped when `.git` is absent. Guard tests must copy the wrapper
-      into a temp dir *without* `run.sh` and only exercise the guard
-      path — never invoke the wrapper where `run.sh` exists: CI runners
-      have passwordless sudo and would really exec the root launcher.
+      skipped when `.git` is absent. Guard tests must run the wrapper
+      only from a temp dir where `run.sh` is absent or a non-executable
+      0644 stub — never where a real executable `run.sh` exists: CI
+      runners have passwordless sudo and would really exec the root
+      launcher.
 - [ ] Lint gates: passes `bash -n` and `shellcheck`. The pre-commit
       shellcheck-py hook filters on the `shell` tag — a `.command`
       extension is not auto-tagged, but an executable file with a bash
@@ -154,8 +155,8 @@ Name: `dislocker-ui.command` at the repo root (next to `run.sh`).
       (`test_usage_text_covers_mount_flow`), and no backticks (Tk
       renders them literally), e.g.:
       "1. Launch by double-clicking dislocker-ui.command"
-      "(Finder opens Terminal for the password prompt),"
-      "or run sudo ./run.sh in Terminal."
+      "   (Finder opens Terminal for the password prompt),"
+      "   or run sudo ./run.sh in Terminal."
       Add a test asserting "dislocker-ui.command" appears in
       `USAGE_TEXT`. Also mention the `.command` in the AGENTS.md
       "Commands" launch line.
@@ -176,13 +177,14 @@ Name: `dislocker-ui.command` at the repo root (next to `run.sh`).
 
 ## Non-goals
 
-- Any `.app` bundle elevation via osascript — blocked by the TCC findings
-  above; do not retry variants (Removable-Volumes grant, signed bundle,
-  Platypus) — they share the severed-descent flaw. Only the Full Disk
-  Access grant was tested empirically (run 2); other grant categories are
-  untested, but any grant keys on the launching `.app`, which is never the
-  responsible process for the admin-prompted child — the same block
-  applies regardless of grant type.
+- Any `.app` bundle elevation via osascript — blocked by the measured
+  TCC findings above; do not retry variants (Removable-Volumes grant,
+  signed bundle, Platypus) — under the hypothesized mechanism they share
+  the severed-descent flaw. Only the Full Disk Access grant was tested
+  empirically (run 2); other grant categories are untested, but under the
+  same hypothesis any grant keys on the launching `.app`, which is never
+  the responsible process for the admin-prompted child — the same block
+  is expected regardless of grant type.
 - Privileged LaunchDaemon / SMAppService / SMJobBless — signing + XPC
   refactor of `elevate.py`/`privileged.py`; `run.sh` declares root-owned
   install packaging out of scope for this personal helper.
@@ -201,9 +203,10 @@ Name: `dislocker-ui.command` at the repo root (next to `run.sh`).
   removable-volume consent was never audited on this machine (TCC.db is
   unreadable); a fresh Mac may need the Privacy & Security grant before
   the sudo path works — covered by the README troubleshooting line.
-- `.command` files run with a minimal environment and `sudo` resets the
-  environment (`env_reset`); the wrapper must resolve `run.sh` relative
-  to itself, never via `$PATH` or inherited exports. `run.sh` sets its
-  own `PYTHONPATH`, so nothing is lost.
+- Terminal runs a `.command` through the user's login shell with
+  cwd=`$HOME`, and `sudo` resets the environment (`env_reset`); so the
+  wrapper resolves `run.sh` from `$0` — never from cwd, `$PATH`, or
+  inherited exports. `run.sh` sets its own `PYTHONPATH`, so nothing is
+  lost.
 - The probe artifacts live in gitignored `tmp/tcc-test/`; the results
   tables and control notes above are the durable record.
