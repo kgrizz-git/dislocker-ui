@@ -25,12 +25,17 @@
 set -euo pipefail
 
 SELF="$0"
-# readlink -f is macOS 12.3+; older systems fall back to $0 itself.
-if _resolved="$(readlink -f "$SELF" 2>/dev/null)"; then
-  SELF="$_resolved"
+# Fail closed: if the real path cannot be resolved, refuse to run —
+# falling back to $0 would let a symlink named like this file reach
+# sudo for an attacker's planted run.sh. Resolvers are absolute for the
+# same reason sudo is: login-shell PATH is not guaranteed.
+if ! _resolved="$(/usr/bin/readlink -f "$SELF" 2>/dev/null)" || [ -z "$_resolved" ]; then
+  echo "dislocker-ui: cannot resolve $SELF" >&2
+  exit 1
 fi
-ROOT="$(cd "$(dirname "$SELF")" && pwd)" || {
-  echo "dislocker-ui: cannot resolve $(dirname "$SELF")" >&2
+SELF="$_resolved"
+ROOT="$(cd "$(/usr/bin/dirname "$SELF")" && pwd)" || {
+  echo "dislocker-ui: cannot resolve $(/usr/bin/dirname "$SELF")" >&2
   exit 1
 }
 
@@ -40,7 +45,7 @@ if [ ! -f "$ROOT/run.sh" ] || [ ! -x "$ROOT/run.sh" ]; then
 fi
 
 if [ "$(id -u)" -eq 0 ]; then
-  exec "$ROOT/run.sh" "$@"   # already root (relaunched via sudo)
+  exec "$ROOT/run.sh" "$@"   # already root (e.g. sudo ./dislocker-ui.command)
 fi
 
 exec /usr/bin/sudo "$ROOT/run.sh" "$@"

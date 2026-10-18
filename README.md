@@ -256,9 +256,12 @@ A condensed version of this list is in the app under Help → Troubleshooting.
   Installation, section 3, then Recheck deps. The symlink can
   break on every upgrade.
 - **Cannot open the disk / permission denied (TCC)** — mounting
-  needs to open removable `/dev/disk*`, which macOS TCC blocks for
-  an unprivileged GUI and its administrator-prompt child. Launch
-  with `sudo ./run.sh`. Without sudo the app cannot complete a mount.
+  needs to open removable `/dev/disk*`; the TCC gate keys on launch
+  context, not uid, so both an unprivileged GUI and its
+  administrator-prompt child are blocked. Launch with
+  `sudo ./run.sh` (or double-click `dislocker-ui.command`). If mounts
+  still fail with EPERM, allow Terminal under Privacy & Security →
+  Removable Volumes (or Full Disk Access).
 - **"Refusing to elevate: …"** — a broken `.py` symlink under `src/`
   must be removed (`sudo ./run.sh` refuses importable `.py` symlinks
   too). For an unreadable entry (e.g. a mode-0700 `__pycache__` left by

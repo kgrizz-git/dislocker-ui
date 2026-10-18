@@ -20,11 +20,13 @@ Requirements:
   is exercised ONLY from temp copies where ``run.sh`` is absent or a
   non-executable 0644 stub — never where a real executable ``run.sh``
   exists: CI runners have passwordless sudo and would really exec the
-  root launcher.
+  root launcher. Every wrapper invocation uses a dedicated empty cwd
+  (never the repo, which has an executable ``run.sh``).
 """
 
 from __future__ import annotations
 
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -64,13 +66,23 @@ def test_command_passes_shellcheck() -> None:
 
 
 def test_command_resolves_real_path_before_root() -> None:
-    """Symlinks are resolved before ROOT (planted run.sh must not reach sudo)."""
+    """Symlinks are resolved fail-closed (planted run.sh must not reach sudo)."""
     body = _COMMAND.read_text(encoding="utf-8")
     assert 'SELF="$0"' in body
-    assert 'readlink -f "$SELF"' in body
-    assert 'ROOT="$(cd "$(dirname "$SELF")" && pwd)"' in body
+    assert '/usr/bin/readlink -f "$SELF"' in body
+    # Fail closed: an unresolvable path refuses to run rather than
+    # falling back to $0 (which would reopen the symlink attack).
+    assert "cannot resolve $SELF" in body
+    assert 'ROOT="$(cd "$(/usr/bin/dirname "$SELF")" && pwd)"' in body
     assert 'exec /usr/bin/sudo "$ROOT/run.sh" "$@"' in body
     assert 'exec "$ROOT/run.sh" "$@"' in body
+
+
+def _empty_cwd(tmp_path: Path) -> Path:
+    """A dedicated empty cwd so a cwd-based ROOT regression stays safe."""
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    return cwd
 
 
 def _run_wrapper_without_real_run_sh(
@@ -80,7 +92,12 @@ def _run_wrapper_without_real_run_sh(
     copy = tmp_path / "dislocker-ui.command"
     copy.write_text(_COMMAND.read_text(encoding="utf-8"), encoding="utf-8")
     return subprocess.run(
-        ["bash", str(copy)], check=False, capture_output=True, text=True, timeout=10
+        ["bash", str(copy)],
+        cwd=_empty_cwd(tmp_path),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
     )
 
 
@@ -107,9 +124,46 @@ def test_command_guards_non_executable_run_sh(tmp_path: Path) -> None:
     stub.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     stub.chmod(0o644)
     proc = subprocess.run(
-        ["bash", str(copy)], check=False, capture_output=True, text=True, timeout=10
+        ["bash", str(copy)],
+        cwd=_empty_cwd(tmp_path),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
     )
     _assert_guard_message(proc, tmp_path)
+
+
+def test_command_through_symlink_never_runs_planted_run_sh(tmp_path: Path) -> None:
+    """Behavioral: a symlink to the wrapper plus a planted executable
+    run.sh must not reach sudo — resolution follows the link, the guard
+    fires against the real directory, and the planted script never runs."""
+    real = tmp_path / "real"
+    real.mkdir()
+    copy = real / "dislocker-ui.command"
+    copy.write_text(_COMMAND.read_text(encoding="utf-8"), encoding="utf-8")
+
+    planted_dir = tmp_path / "planted"
+    planted_dir.mkdir()
+    link = planted_dir / "dislocker-ui.command"
+    link.symlink_to(copy)
+    marker = planted_dir / "planted-ran"
+    planted = planted_dir / "run.sh"
+    planted.write_text(f"#!/usr/bin/env bash\ntouch {shlex.quote(str(marker))}\n", encoding="utf-8")
+    planted.chmod(0o755)
+
+    proc = subprocess.run(
+        ["bash", str(link)],
+        cwd=_empty_cwd(tmp_path),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    stderr = proc.stderr.strip()
+    assert proc.returncode == 1, stderr
+    assert f"{real.resolve()}/run.sh" in stderr, stderr
+    assert not marker.exists(), "the planted run.sh ran"
 
 
 def test_command_exec_bit_is_committed() -> None:
