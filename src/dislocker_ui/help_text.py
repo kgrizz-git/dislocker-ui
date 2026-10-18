@@ -31,7 +31,9 @@ License: GPL-3.0-or-later.
 """
 
 USAGE_TEXT = """Usage
-1. Launch with: sudo ./run.sh
+1. Launch by double-clicking dislocker-ui.command
+   (Finder opens Terminal for the password prompt),
+   or run sudo ./run.sh in Terminal.
 2. Select a volume (or type /dev/diskXsY).
 3. Choose the unlock method and enter the secret.
 4. Leave Read-only checked unless you need writes.
@@ -61,7 +63,9 @@ dislocker stops loading after brew upgrade: reinstall
 mbedtls@3 and re-create the libmbedcrypto symlink (see the
 README install section); re-run it after each upgrade.
 Cannot open the disk: launch with sudo ./run.sh — an
-unprivileged GUI is blocked by macOS TCC.
+unprivileged GUI is blocked by macOS TCC. If mounts
+still fail with EPERM, allow Terminal under Privacy
+& Security, Removable Volumes (or Full Disk Access).
 "Refusing to elevate: ...": a broken .py symlink under
 src/ must be removed (sudo ./run.sh refuses importable .py
 symlinks too). For an unreadable entry (e.g. a mode-0700

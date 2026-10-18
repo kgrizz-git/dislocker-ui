@@ -56,6 +56,12 @@ Workflow for agents:
 3. Finish a whole plan → move `plans/<name>.md` to `plans/archive/` (prefer `YYYY-MM-DD-<slug>.md`), clear its TO_DO section, update the right changelog.
 4. Never commit secrets, recovery keys, or machine-specific home paths in plans or TO_DO.
 
+Pending manual smoke tests: at the start of a session, check `TO_DO.md`
+**Next Up**. If it lists a manual smoke test (e.g. the double-click launcher
+check), remind the user once that it still needs a run on real hardware.
+Agents cannot run it themselves, and must not mark it done until the user
+reports the result.
+
 ## Conventions
 
 - Python 3.10+, stdlib only for runtime unless the user explicitly adds a dependency.
@@ -73,6 +79,8 @@ Workflow for agents:
 ## Commands
 
 ```bash
+# Double-click dislocker-ui.command in Finder (Terminal opens; sudo
+# prompts there), or from the repo root:
 sudo ./run.sh
 # or: sudo env PYTHONPATH=src python3 -m dislocker_ui
 python3 -m compileall -q src
@@ -119,9 +127,11 @@ Public contribution posture: Issues welcome; PRs may be limited to collaborators
 ## Security / privileges
 
 Mounting BitLocker volumes needs elevated rights to open `/dev/disk*`. On Darwin
-launch with ``sudo ./run.sh`` so the GUI is already root and runs the mount
-pipeline in-process (macOS TCC blocks the unprivileged osascript-elevated path
-from opening removable disks). Do not weaken trust checks by copying volume
+launch with ``sudo ./run.sh`` (or double-click `dislocker-ui.command`) so the
+GUI is already root and runs the mount pipeline in-process. (The TCC gate on
+removable device opens keys on launch context, not uid — a root child spawned
+by an osascript admin prompt is still blocked; see
+`plans/double-clickable-app.md`.) Do not weaken trust checks by copying volume
 contents into world-readable temp files unless the user asks for a decrypt-to-file
 feature. Never commit passwords, recovery keys, `.bek` files, or session dumps
 with secrets. BitLocker secrets may still appear briefly on `dislocker-fuse`

@@ -38,6 +38,11 @@ def test_usage_text_covers_mount_flow() -> None:
         assert fragment in USAGE_TEXT
 
 
+def test_usage_text_names_double_click_launcher() -> None:
+    """Usage names the double-clickable launcher alongside the sudo path."""
+    assert "dislocker-ui.command" in USAGE_TEXT
+
+
 def test_troubleshooting_covers_stale_session_recovery() -> None:
     """The stale-session entry keeps the guard and the manual command."""
     assert "confirm" in TROUBLESHOOTING_TEXT

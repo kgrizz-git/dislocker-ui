@@ -6,6 +6,32 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.7.0] - 2026-10-17
+
+### Changed
+
+- README: added badges (CI, SonarCloud quality gate, license, Python,
+  platform), a Quick start, and a short "Why sudo?" section. Moved the
+  Layout, Developer checks, and SonarCloud sections to `CONTRIBUTING.md`.
+- `TO_DO.md` gained a **Next Up** section for the launcher smoke test,
+  and `AGENTS.md` tells agents to remind the user about pending manual
+  smoke tests.
+
+### Added
+
+- `tests/test_command_launcher_static.py`: static + behavioral gates for
+  the new launcher — `bash -n`, a direct shellcheck call (CI never runs
+  the pre-commit hook; the `shell` tag only reaches a `.command` via the
+  exec bit + shebang), symlink-resolution and sudo-line asserts, guard
+  tests run from temp copies only (never where a real executable
+  `run.sh` exists — CI runners have passwordless sudo), and a
+  committed-mode `100755` check.
+- Tracked plan `plans/double-clickable-app.md`: records the 2026-10-17
+  TCC experiments that ruled out every `.app` + osascript wrapper
+  (measured differential; severed descent labeled as the working
+  hypothesis) and the `.command` design decision, plus AGENTS.md
+  Commands / Security notes and the README launch-doc updates.
+
 ## [0.6.0] - 2026-10-04
 
 ### Changed

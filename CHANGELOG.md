@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.7.0] - 2026-10-17
+
+### Added
+
+- `dislocker-ui.command`: double-clickable launcher. Finder opens
+  Terminal for the admin password; the GUI then runs already-root via
+  the existing `run.sh`, which re-validates everything. Requires
+  macOS 12.3+. The wrapper refuses a symlinked or group/world-writable
+  `run.sh` (or repo root) before invoking sudo. A `.app` that elevates
+  via an osascript admin prompt cannot work under macOS TCC — the gate
+  on removable device opens keys on launch context, not uid — so the
+  Terminal-attached `.command` is the supported double-click path.
+- README: double-click launch instructions, a macOS 15+ Gatekeeper note
+  for zip downloads (System Settings → Open Anyway, or
+  `xattr -d com.apple.quarantine`), and a troubleshooting line for
+  EPERM mounts (allow Terminal under Removable Volumes / Full Disk
+  Access).
+- App icon (`assets/icon.png`), shown in the README. The launcher sets
+  it as its own Finder icon on first launch; git cannot carry Finder
+  icons, and a failure never blocks the launch.
+- Help menu Usage now names the double-click launcher alongside
+  `sudo ./run.sh`.
+
 ## [0.6.0] - 2026-10-04
 
 ### Added

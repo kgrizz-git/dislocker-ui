@@ -11,6 +11,22 @@ Open work only for **dislocker-ui**.
 - User-visible completions also need `VERSION` + [`CHANGELOG.md`](CHANGELOG.md); harness-only notes go in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 - See [`plans/README.md`](plans/README.md) for the full plans workflow.
 
+## Next Up
+
+- **Smoke-test the double-click launcher** (0.7.0, [plan](plans/double-clickable-app.md),
+  needs a real BitLocker drive, ~5 min):
+  1. Double-click `dislocker-ui.command`, enter the admin password in
+     Terminal, and confirm the GUI opens.
+  2. Mount the volume and confirm its files are readable.
+  3. With the volume still mounted, close Terminal (accept the
+     "terminate running processes?" warning). Confirm the GUI exits
+     promptly with no hang or leftover process.
+  4. Relaunch and confirm Mount self-heals (or Unmount clears) the stale
+     session. Compare `diskutil list` before and after: no unrelated
+     disk may be ejected.
+  If step 3 misbehaves, add a wrapper `trap` or a SIGHUP handler in
+  `__main__.py` (see the plan). When it passes, archive the plan.
+
 ## Active
 
 - Stale-session fix (0.5.3, [archived plan](plans/archive/2026-10-03-stale-session-unmount.md)):
