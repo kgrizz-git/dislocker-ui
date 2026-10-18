@@ -8,6 +8,15 @@ Version numbers match `VERSION` / SemVer with the public changelog.
 
 ## [0.7.0] - 2026-10-17
 
+### Changed
+
+- README: added badges (CI, SonarCloud quality gate, license, Python,
+  platform), a Quick start, and a short "Why sudo?" section. Moved the
+  Layout, Developer checks, and SonarCloud sections to `CONTRIBUTING.md`.
+- `TO_DO.md` gained a **Next Up** section for the launcher smoke test,
+  and `AGENTS.md` tells agents to remind the user about pending manual
+  smoke tests.
+
 ### Added
 
 - `tests/test_command_launcher_static.py`: static + behavioral gates for

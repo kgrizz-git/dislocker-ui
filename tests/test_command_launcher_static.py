@@ -17,10 +17,10 @@ Overall purpose:
 Requirements:
   pytest, subprocess with bash. ``bash -n`` gates syntax and shellcheck
   runs when installed (CI never runs the pre-commit hook). Guard behavior
-  is exercised ONLY from temp copies where ``run.sh`` is absent or a
-  non-executable 0644 stub — never where a real executable ``run.sh``
-  exists: CI runners have passwordless sudo and would really exec the
-  root launcher. Every wrapper invocation uses a dedicated empty cwd
+  is exercised ONLY from temp copies where ``run.sh`` is absent, a
+  non-executable 0644 stub, or a harmless marker script the wrapper must
+  refuse — never where the real ``run.sh`` exists: CI runners have
+  passwordless sudo and would really exec the root launcher. Every wrapper invocation uses a dedicated empty cwd
   (never the repo, which has an executable ``run.sh``).
 """
 
@@ -29,6 +29,7 @@ from __future__ import annotations
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -148,9 +149,7 @@ def test_command_through_symlink_never_runs_planted_run_sh(tmp_path: Path) -> No
     link = planted_dir / "dislocker-ui.command"
     link.symlink_to(copy)
     marker = planted_dir / "planted-ran"
-    planted = planted_dir / "run.sh"
-    planted.write_text(f"#!/usr/bin/env bash\ntouch {shlex.quote(str(marker))}\n", encoding="utf-8")
-    planted.chmod(0o755)
+    _plant_run_sh(planted_dir, marker)
 
     proc = subprocess.run(
         ["bash", str(link)],
@@ -164,6 +163,85 @@ def test_command_through_symlink_never_runs_planted_run_sh(tmp_path: Path) -> No
     assert proc.returncode == 1, stderr
     assert f"{real.resolve()}/run.sh" in stderr, stderr
     assert not marker.exists(), "the planted run.sh ran"
+
+
+def _plant_run_sh(directory: Path, marker: Path) -> Path:
+    """An executable run.sh that only touches ``marker`` if it ever runs."""
+    planted = directory / "run.sh"
+    planted.write_text(f"#!/usr/bin/env bash\ntouch {shlex.quote(str(marker))}\n", encoding="utf-8")
+    planted.chmod(0o755)
+    return planted
+
+
+def test_command_fails_closed_when_real_path_unresolvable(tmp_path: Path) -> None:
+    """Behavioral: when readlink -f fails, the wrapper exits instead of
+    falling back to $0 — whose directory here holds a planted run.sh."""
+    planted_dir = tmp_path / "planted"
+    planted_dir.mkdir()
+    loop = planted_dir / "dislocker-ui.command"
+    loop.symlink_to(loop.name)  # self-loop: readlink -f fails (ELOOP)
+    marker = planted_dir / "planted-ran"
+    _plant_run_sh(planted_dir, marker)
+
+    proc = subprocess.run(
+        ["bash", "-c", _COMMAND.read_text(encoding="utf-8"), str(loop)],
+        cwd=_empty_cwd(tmp_path),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    stderr = proc.stderr.strip()
+    assert proc.returncode == 1, stderr
+    assert stderr == f"dislocker-ui: cannot resolve {loop}", stderr
+    assert not marker.exists(), "the planted run.sh ran"
+
+
+def test_command_refuses_symlinked_run_sh(tmp_path: Path) -> None:
+    """Behavioral: a run.sh symlink is refused before sudo, even when its
+    target is an executable script."""
+    copy = tmp_path / "dislocker-ui.command"
+    copy.write_text(_COMMAND.read_text(encoding="utf-8"), encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    marker = tmp_path / "planted-ran"
+    target = _plant_run_sh(elsewhere, marker)
+    (tmp_path / "run.sh").symlink_to(target)
+
+    proc = subprocess.run(
+        ["bash", str(copy)],
+        cwd=_empty_cwd(tmp_path),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    stderr = proc.stderr.strip()
+    assert proc.returncode == 1, stderr
+    assert stderr == f"dislocker-ui: refusing symlinked {tmp_path.resolve()}/run.sh", stderr
+    assert not marker.exists(), "the symlinked run.sh ran"
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="wrapper uses BSD stat")
+def test_command_refuses_group_writable_run_sh(tmp_path: Path) -> None:
+    """Behavioral: a run.sh another user could replace is refused before sudo."""
+    copy = tmp_path / "dislocker-ui.command"
+    copy.write_text(_COMMAND.read_text(encoding="utf-8"), encoding="utf-8")
+    marker = tmp_path / "planted-ran"
+    _plant_run_sh(tmp_path, marker).chmod(0o775)
+
+    proc = subprocess.run(
+        ["bash", str(copy)],
+        cwd=_empty_cwd(tmp_path),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    stderr = proc.stderr.strip()
+    assert proc.returncode == 1, stderr
+    assert stderr == f"dislocker-ui: refusing group/world-writable {tmp_path.resolve()}/run.sh"
+    assert not marker.exists(), "the writable run.sh ran"
 
 
 def test_command_exec_bit_is_committed() -> None:

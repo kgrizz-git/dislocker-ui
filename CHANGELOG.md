@@ -13,9 +13,11 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
 - `dislocker-ui.command`: double-clickable launcher. Finder opens
   Terminal for the admin password; the GUI then runs already-root via
-  the existing `run.sh`, which re-validates everything. A
-  double-clickable `.app` is not possible under macOS TCC — the gate on
-  removable device opens keys on launch context, not uid — so the
+  the existing `run.sh`, which re-validates everything. Requires
+  macOS 12.3+. The wrapper refuses a symlinked or group/world-writable
+  `run.sh` (or repo root) before invoking sudo. A `.app` that elevates
+  via an osascript admin prompt cannot work under macOS TCC — the gate
+  on removable device opens keys on launch context, not uid — so the
   Terminal-attached `.command` is the supported double-click path.
 - README: double-click launch instructions, a macOS 15+ Gatekeeper note
   for zip downloads (System Settings → Open Anyway, or

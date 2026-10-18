@@ -1,14 +1,18 @@
 # dislocker-ui
 
-Simple macOS GUI frontend for [dislocker](https://github.com/Aorimn/dislocker).
-It does **not** fork or reimplement BitLocker crypto — it shells out to an
-installed `dislocker-fuse` and then attaches/mounts the resulting filesystem
-image (NTFS via ntfs-3g, or FAT/ExFAT via system mount helpers).
+[![CI](https://github.com/kgrizz-git/dislocker-ui/actions/workflows/ci.yml/badge.svg)](https://github.com/kgrizz-git/dislocker-ui/actions/workflows/ci.yml)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=kgrizz-git_dislocker-ui&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=kgrizz-git_dislocker-ui)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)
 
-**Version:** see [`VERSION`](VERSION).
+A small macOS GUI for mounting BitLocker drives with
+[dislocker](https://github.com/Aorimn/dislocker). It does **not** reimplement
+BitLocker crypto. It drives an installed `dislocker-fuse`, then mounts the
+decrypted image (NTFS via ntfs-3g, FAT/ExFAT via the system mount helpers).
 
-Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
-[`CONTRIBUTING.md`](CONTRIBUTING.md).
+**Version:** see [`VERSION`](VERSION) · [Changelog](CHANGELOG.md) ·
+[Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
 
 ## What it does
 
@@ -17,30 +21,38 @@ Security reports: [`SECURITY.md`](SECURITY.md). Contributing / Issues:
    for NTFS, system **mount_msdos** / **mount_exfat** for BitLocker To Go FAT/ExFAT.
 3. Unmount cleanly (volume → detach raw disk → unmount FUSE).
 
-On modern macOS, double-click **`dislocker-ui.command`** — Finder opens
-Terminal and asks for the admin password there — or launch with
-**`sudo ./run.sh`**. The GUI then runs already-root and mounts in-process
-(no osascript administrator dialog). An unprivileged GUI cannot open
-removable `/dev/disk*` under TCC, so non-sudo launches cannot complete a
-useful mount. A double-clickable `.app` is not possible: the TCC gate on
-removable device opens keys on launch context, not uid — an osascript-elevated
-child of a `.app` is silently denied even as root, even with Full Disk Access
-granted to the `.app` (measured 2026-10-17; see
-[`plans/double-clickable-app.md`](plans/double-clickable-app.md)). Keep the
-Terminal window open while the app runs — closing it ends the app.
+## Quick start
+
+1. Install the dependencies ([Installation](#installation), sections 1–4).
+2. Double-click **`dislocker-ui.command`** in Finder. Terminal opens and asks
+   for your admin password. (Or run `sudo ./run.sh` from the repo root.)
+3. Pick the drive, enter the password or recovery key, and click **Mount**.
+4. Click **Unmount** before you eject the drive. Keep the Terminal window
+   open while the app runs, because closing it ends the app.
+
+### Why sudo?
+
+macOS privacy controls (TCC) block an unprivileged GUI from opening removable
+`/dev/disk*` devices, so the app must already run as root. The gate keys on
+launch context, not uid. A `.app` that elevates through an osascript
+administrator prompt is denied even as root, even with Full Disk Access
+(measured 2026-10-17; see
+[`plans/double-clickable-app.md`](plans/double-clickable-app.md)). A
+Terminal-attached `sudo` works, which is why the launcher is a `.command`.
+The `.command` needs macOS 12.3+; on older systems use `sudo ./run.sh`.
 
 `run.sh` executes the **checkout** as root (`PYTHONPATH=…/src`). Keep the repo
-owned by you and not group-/world-writable; do not `sudo` a shared or untrusted
-tree. A separate root-owned app package is out of scope for this personal helper.
+owned by you and not group-/world-writable, and do not `sudo` a shared or
+untrusted tree. Both launchers refuse a writable tree.
 
-Elevated GUI mounts intentionally support physical BitLocker devices
-(`/dev/diskN` or `/dev/diskNsM`) only; regular image files are out of scope.
+Mounts support physical BitLocker devices (`/dev/diskN` or `/dev/diskNsM`)
+only. Regular image files are out of scope.
 
 ## Requirements
 
 | Dependency | Required? | Role |
 |------------|-----------|------|
-| macOS | Yes | Target platform |
+| macOS | Yes | Target platform (12.3+ for the double-click `.command`) |
 | Python 3.10+ with tkinter | Yes | GUI |
 | [dislocker](https://github.com/Aorimn/dislocker) | Yes | BitLocker unlock (`dislocker-fuse`) |
 | [macFUSE](https://osxfuse.github.io/) ≥4.10 | Yes | Required for dislocker + ntfs-3g options used here (`allow_other` / `local` / uid). Must provide a `fuse3` pkg-config entry. |
@@ -118,9 +130,10 @@ Notes:
   `ntfs-3g` as root-owned, non-group/world-writable executables under
   `/usr/local/sbin` or `/opt/local/sbin`. A normal user-owned Homebrew
   installation is deliberately not executed as root.
-- Mounts need administrator authorization (macOS dialog). Running
-  `sudo ./run.sh` remains a power-user escape hatch (already-root path skips
-  osascript). Elevating from a user-writable checkout is no stronger than that.
+- Mounts need an already-root GUI: double-click `dislocker-ui.command`
+  (admin password in Terminal) or run `sudo ./run.sh`. The osascript
+  administrator-dialog path cannot open physical removable volumes under
+  TCC. Elevating from a user-writable checkout is no stronger than that.
 
 ### 4. One-time root install (optional helper)
 
@@ -268,61 +281,10 @@ A condensed version of this list is in the app under Help → Troubleshooting.
   an earlier `sudo ./run.sh` under a restrictive umask), follow the
   printed hint, or launch with `sudo ./run.sh`.
 
-## Layout
+## Development
 
-```
-src/dislocker_ui/   # application package
-tests/              # test helpers / scripts
-plans/              # active implementation plans (archive/ for finished)
-TO_DO.md            # open work only (remove items when done)
-CHANGELOG.md        # user-visible product changes
-CHANGELOG.dev.md    # harness / CI / docs-only notes
-tmp/                # local scratch (gitignored)
-.context/           # disposable agent scratch (gitignored)
-run.sh              # launcher
-dislocker-ui.command  # double-clickable launcher (Finder → Terminal → sudo)
-pyproject.toml      # packaging + Ruff config
-.pre-commit-config.yaml  # optional local hooks (incl. pre-push)
-hooks/              # local policy scripts (absolute-path / line-count)
-.sonarcloud.properties   # SonarCloud Automatic Analysis scope
-.github/            # CI + issue/PR templates
-```
-
-## Developer checks
-
-Runtime needs no pip packages. Optional lint/hooks:
-
-```bash
-pip install -e ".[dev]"   # ruff, pre-commit, pytest, pip-audit
-ruff check src tests hooks
-ruff format src tests hooks
-pytest --cov --cov-report=term-missing
-python3 hooks/check_absolute_paths.py
-python3 hooks/check_file_size.py
-pip-audit                 # prefer a clean venv, not a shared global env
-pre-commit install -t pre-commit -t pre-push
-pre-commit run --all-files
-```
-
-CI on GitHub runs compileall, Ruff (incl. complexity), absolute-path and
-line-count checks, pytest with coverage, pip-audit, Semgrep (OWASP Top 10 +
-Python rules), and gitleaks.
-
-### SonarCloud (Automatic Analysis)
-
-No `SONAR_TOKEN` is required for the default setup:
-
-1. Sign in at [SonarQube Cloud](https://sonarcloud.io) with GitHub and import
-   `kgrizz-git/dislocker-ui` (public / open-source plan is fine).
-2. In the project: **Administration → Analysis Method → Automatic Analysis** → on.
-3. Optional: keep [`.sonarcloud.properties`](.sonarcloud.properties) for source/test
-   paths (already in this repo). Set path exclusions in the SonarCloud UI
-   (**Administration → General Settings → Analysis Scope**); Automatic Analysis
-   does not support wildcard `sonar.exclusions` in `.sonarcloud.properties`.
-
-Do **not** also run a CI-based Sonar scan while Automatic Analysis is enabled
-(SonarCloud rejects that combo). Coverage upload needs CI-based analysis later
-if you want it.
+Layout, developer checks, CI, and SonarCloud setup live in
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 

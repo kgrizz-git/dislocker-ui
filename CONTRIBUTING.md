@@ -21,24 +21,71 @@ Security reports: see [`SECURITY.md`](SECURITY.md) (private advisory preferred).
 Requirements: macOS, Python 3.10+, an installed `dislocker` stack if you want to
 exercise mounts (the unit tests do not need a BitLocker volume).
 
-```bash
-cd /path/to/dislocker-ui
-pip install -e ".[dev]"
-pre-commit install -t pre-commit -t pre-push
+Lint, test, and hook commands are under [Developer checks](#developer-checks).
 
-python3 -m compileall -q src
-ruff check src tests hooks
-ruff format --check src tests hooks
-pytest --cov --cov-report=term-missing
-python3 hooks/check_absolute_paths.py
-python3 hooks/check_file_size.py
-```
-
-Run the GUI:
+Run the GUI (unprivileged runs open the UI but cannot complete a real
+mount; use `sudo ./run.sh` for that):
 
 ```bash
 PYTHONPATH=src python3 -m dislocker_ui
 ```
+
+## Layout
+
+```
+src/dislocker_ui/   # application package
+tests/              # test helpers / scripts
+plans/              # active implementation plans (archive/ for finished)
+TO_DO.md            # open work only (remove items when done)
+CHANGELOG.md        # user-visible product changes
+CHANGELOG.dev.md    # harness / CI / docs-only notes
+tmp/                # local scratch (gitignored)
+.context/           # disposable agent scratch (gitignored)
+run.sh              # launcher
+dislocker-ui.command  # double-clickable launcher (Finder → Terminal → sudo)
+pyproject.toml      # packaging + Ruff config
+.pre-commit-config.yaml  # optional local hooks (incl. pre-push)
+hooks/              # local policy scripts (absolute-path / line-count)
+.sonarcloud.properties   # SonarCloud Automatic Analysis scope
+.github/            # CI + issue/PR templates
+```
+
+## Developer checks
+
+Runtime needs no pip packages. Optional lint/hooks:
+
+```bash
+pip install -e ".[dev]"   # ruff, pre-commit, pytest, pip-audit
+python3 -m compileall -q src
+ruff check src tests hooks
+ruff format src tests hooks
+pytest --cov --cov-report=term-missing
+python3 hooks/check_absolute_paths.py
+python3 hooks/check_file_size.py
+pip-audit                 # prefer a clean venv, not a shared global env
+pre-commit install -t pre-commit -t pre-push
+pre-commit run --all-files
+```
+
+CI on GitHub runs compileall, Ruff (incl. complexity), absolute-path and
+line-count checks, pytest with coverage, pip-audit, Semgrep (OWASP Top 10 +
+Python rules), and gitleaks.
+
+### SonarCloud (Automatic Analysis)
+
+No `SONAR_TOKEN` is required for the default setup:
+
+1. Sign in at [SonarQube Cloud](https://sonarcloud.io) with GitHub and import
+   `kgrizz-git/dislocker-ui` (public / open-source plan is fine).
+2. In the project: **Administration → Analysis Method → Automatic Analysis** → on.
+3. Optional: keep [`.sonarcloud.properties`](.sonarcloud.properties) for source/test
+   paths (already in this repo). Set path exclusions in the SonarCloud UI
+   (**Administration → General Settings → Analysis Scope**); Automatic Analysis
+   does not support wildcard `sonar.exclusions` in `.sonarcloud.properties`.
+
+Do **not** also run a CI-based Sonar scan while Automatic Analysis is enabled
+(SonarCloud rejects that combo). Coverage upload needs CI-based analysis later
+if you want it.
 
 ## Project rules (please respect)
 

@@ -85,38 +85,19 @@ Terminal opens → user types the admin password → `sudo` runs the existing
 documented flow. All root-side hardening stays in `run.sh`; the
 `.command` is a thin unprivileged wrapper.
 
-Design sketch (shipped form; `readlink` resolution and the `-f` guard
-were added in review — a symlink named like the launcher plus a planted
-executable `run.sh` must never reach sudo):
-
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-SELF="$0"
-# readlink -f is macOS 12.3+; older systems fall back to $0 itself.
-if _resolved="$(readlink -f "$SELF" 2>/dev/null)"; then
-  SELF="$_resolved"
-fi
-ROOT="$(cd "$(dirname "$SELF")" && pwd)" || {
-  echo "dislocker-ui: cannot resolve $(dirname "$SELF")" >&2
-  exit 1
-}
-if [ ! -f "$ROOT/run.sh" ] || [ ! -x "$ROOT/run.sh" ]; then
-  echo "dislocker-ui: $ROOT/run.sh is missing or not executable" >&2
-  exit 1
-fi
-if [ "$(id -u)" -eq 0 ]; then
-  exec "$ROOT/run.sh" "$@"   # already root (relaunched via sudo)
-fi
-exec /usr/bin/sudo "$ROOT/run.sh" "$@"
-```
+Shipped form: see [`dislocker-ui.command`](../dislocker-ui.command). It
+resolves its real path with `/usr/bin/readlink -f` and **fails closed**
+when resolution fails (never falls back to `$0`), then refuses a missing,
+non-executable, symlinked, or group/world-writable `run.sh` (or repo root)
+before `sudo` — a symlink named like the launcher plus a planted
+executable `run.sh` must never reach sudo. `readlink -f` needs macOS 12.3+.
 
 Name: `dislocker-ui.command` at the repo root (next to `run.sh`).
 
 ## Checklist
 
 - [x] Add `dislocker-ui.command` (thin wrapper; the symlink resolution,
-      ROOT-failure diagnostic, and `-x`/`-f` guard are the only pre-sudo
+      ROOT-failure diagnostic, and `run.sh` guards are the only pre-sudo
       logic — nothing in it runs privileged, `run.sh` re-validates
       everything).
 - [x] Commit the executable bit: `chmod +x dislocker-ui.command`

@@ -56,6 +56,12 @@ Workflow for agents:
 3. Finish a whole plan → move `plans/<name>.md` to `plans/archive/` (prefer `YYYY-MM-DD-<slug>.md`), clear its TO_DO section, update the right changelog.
 4. Never commit secrets, recovery keys, or machine-specific home paths in plans or TO_DO.
 
+Pending manual smoke tests: at the start of a session, check `TO_DO.md`
+**Next Up**. If it lists a manual smoke test (e.g. the double-click launcher
+check), remind the user once that it still needs a run on real hardware.
+Agents cannot run it themselves, and must not mark it done until the user
+reports the result.
+
 ## Conventions
 
 - Python 3.10+, stdlib only for runtime unless the user explicitly adds a dependency.

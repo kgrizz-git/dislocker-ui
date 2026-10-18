@@ -28,7 +28,8 @@ SELF="$0"
 # Fail closed: if the real path cannot be resolved, refuse to run —
 # falling back to $0 would let a symlink named like this file reach
 # sudo for an attacker's planted run.sh. Resolvers are absolute for the
-# same reason sudo is: login-shell PATH is not guaranteed.
+# same reason sudo is: login-shell PATH is not guaranteed. readlink -f
+# needs macOS 12.3+; older systems hit this refusal.
 if ! _resolved="$(/usr/bin/readlink -f "$SELF" 2>/dev/null)" || [ -z "$_resolved" ]; then
   echo "dislocker-ui: cannot resolve $SELF" >&2
   exit 1
@@ -43,6 +44,22 @@ if [ ! -f "$ROOT/run.sh" ] || [ ! -x "$ROOT/run.sh" ]; then
   echo "dislocker-ui: $ROOT/run.sh is missing or not executable" >&2
   exit 1
 fi
+
+# run.sh's own gates run as root *inside* run.sh, i.e. after sudo has
+# already executed whatever run.sh is. Gate it before sudo: refuse a
+# symlinked run.sh (its target's mode bits prove nothing) and a run.sh
+# or repo root that another user could replace.
+if [ -L "$ROOT/run.sh" ]; then
+  echo "dislocker-ui: refusing symlinked $ROOT/run.sh" >&2
+  exit 1
+fi
+for _p in "$ROOT" "$ROOT/run.sh"; do
+  _mode="$(/usr/bin/stat -f '%OLp' "$_p")"
+  if [ $((8#$_mode & 022)) -ne 0 ]; then
+    echo "dislocker-ui: refusing group/world-writable $_p" >&2
+    exit 1
+  fi
+done
 
 if [ "$(id -u)" -eq 0 ]; then
   exec "$ROOT/run.sh" "$@"   # already root (e.g. sudo ./dislocker-ui.command)
