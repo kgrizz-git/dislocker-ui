@@ -79,6 +79,16 @@ def test_command_resolves_real_path_before_root() -> None:
     assert 'exec "$ROOT/run.sh" "$@"' in body
 
 
+def test_command_icon_step_is_best_effort_and_unprivileged() -> None:
+    """The Finder-icon step runs after the root branch (never as root),
+    before sudo, and cannot abort the launch under ``set -e``."""
+    body = _COMMAND.read_text(encoding="utf-8")
+    icon = body.index("setIconForFileOptions")
+    assert body.index('exec "$ROOT/run.sh" "$@"') < icon
+    assert icon < body.index('exec /usr/bin/sudo "$ROOT/run.sh" "$@"')
+    assert '"$SELF" >/dev/null 2>&1 || true' in body
+
+
 def _empty_cwd(tmp_path: Path) -> Path:
     """A dedicated empty cwd so a cwd-based ROOT regression stays safe."""
     cwd = tmp_path / "cwd"

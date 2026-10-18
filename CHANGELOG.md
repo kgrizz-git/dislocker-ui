@@ -24,6 +24,9 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
   `xattr -d com.apple.quarantine`), and a troubleshooting line for
   EPERM mounts (allow Terminal under Removable Volumes / Full Disk
   Access).
+- App icon (`assets/icon.png`), shown in the README. The launcher sets
+  it as its own Finder icon on first launch; git cannot carry Finder
+  icons, and a failure never blocks the launch.
 - Help menu Usage now names the double-click launcher alongside
   `sudo ./run.sh`.
 

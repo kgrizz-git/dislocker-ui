@@ -42,6 +42,7 @@ CHANGELOG.dev.md    # harness / CI / docs-only notes
 tmp/                # local scratch (gitignored)
 .context/           # disposable agent scratch (gitignored)
 run.sh              # launcher
+assets/             # app icon (README + launcher Finder icon)
 dislocker-ui.command  # double-clickable launcher (Finder → Terminal → sudo)
 pyproject.toml      # packaging + Ruff config
 .pre-commit-config.yaml  # optional local hooks (incl. pre-push)

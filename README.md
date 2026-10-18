@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/icon.png" width="128" alt="dislocker-ui icon"></p>
+
 # dislocker-ui
 
 [![CI](https://github.com/kgrizz-git/dislocker-ui/actions/workflows/ci.yml/badge.svg)](https://github.com/kgrizz-git/dislocker-ui/actions/workflows/ci.yml)
@@ -26,6 +28,7 @@ decrypted image (NTFS via ntfs-3g, FAT/ExFAT via the system mount helpers).
 1. Install the dependencies ([Installation](#installation), sections 1–4).
 2. Double-click **`dislocker-ui.command`** in Finder. Terminal opens and asks
    for your admin password. (Or run `sudo ./run.sh` from the repo root.)
+   The first launch also gives the launcher its Finder icon.
 3. Pick the drive, enter the password or recovery key, and click **Mount**.
 4. Click **Unmount** before you eject the drive. Keep the Terminal window
    open while the app runs, because closing it ends the app.

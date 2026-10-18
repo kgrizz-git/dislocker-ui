@@ -65,4 +65,15 @@ if [ "$(id -u)" -eq 0 ]; then
   exec "$ROOT/run.sh" "$@"   # already root (e.g. sudo ./dislocker-ui.command)
 fi
 
+# Cosmetic, first launch only: give this file its Finder icon. Git does not
+# carry Finder icons (they live in xattrs), so set it locally, as the user,
+# before sudo. Best-effort: any failure is ignored and never blocks launch.
+if [ -f "$ROOT/assets/icon.png" ] && [ -x /usr/bin/osascript ] &&
+  ! /usr/bin/xattr "$SELF" 2>/dev/null | /usr/bin/grep -qx com.apple.ResourceFork; then
+  /usr/bin/osascript -l JavaScript \
+    -e 'ObjC.import("AppKit")' \
+    -e 'function run(a) { $.NSWorkspace.sharedWorkspace.setIconForFileOptions($.NSImage.alloc.initWithContentsOfFile(a[0]), a[1], 0) }' \
+    "$ROOT/assets/icon.png" "$SELF" >/dev/null 2>&1 || true
+fi
+
 exec /usr/bin/sudo "$ROOT/run.sh" "$@"
