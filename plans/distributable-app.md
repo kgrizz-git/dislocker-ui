@@ -119,8 +119,12 @@ download path. Both must produce the same layout.
   Downloads copy, the path is under `AppTranslocation`; detect and show
   "Move to Applications first" instead of handing a translocated path
   to Terminal.
-- **Architecture:** decide arm64-only vs universal2 (PBS has both;
-  combine with `lipo`). Set `LSMinimumSystemVersion` ≥ 12.3 (launcher
+- **Architecture: arm64 (Apple Silicon) only** — decided 2026-10-29.
+  Apple sold its last Intel Mac in June 2023 and announced macOS 26 as
+  the last Intel-supporting release. Mark the app arm64-only
+  (`LSArchitecturePriority` = arm64, no x86_64 slices) so Intel users get
+  a clear "not supported" rather than a crash. Revisit universal2 only
+  on user demand. Set `LSMinimumSystemVersion` ≥ 12.3 (launcher
   already relies on `readlink -f`).
 
 ### B. Guided first-run setup
@@ -210,7 +214,7 @@ update check (manual re-download for now).
 
 - [ ] Gate: 0.7.0 launcher smoke test passes
 - [ ] FUSE-T spike
-- [ ] Decide arm64-only vs universal2
+- [x] Architecture: arm64-only (decided)
 - [ ] CI toolchain build (pinned, hashed) incl. self-built LGPL libfuse
 - [ ] Signed + notarized toolchain `.pkg` and uninstaller
 - [ ] `scripts/build-app.sh`: Mach-O launcher, bundled `.command`, PBS
