@@ -29,10 +29,11 @@ Open work only for **dislocker-ui**.
 
 ## Active
 
-- Distributable app ([plan](plans/distributable-app.md)): FUSE-T spike
-  (macOS VM + throwaway BitLocker image; Docker can't run macOS), build
-  script + bundled Python, setup panel, signing/notarization, release
-  workflow.
+- Distributable app ([plan](plans/distributable-app.md)), gated on the
+  launcher smoke test: FUSE-T spike (host, separate prefix), signed
+  toolchain `.pkg` (self-built LGPL libfuse), launcher app + bundled
+  Python with pinned-signature checks, setup panel, notarized release
+  workflow. Keep releases free (FUSE licenses restrict commercial use).
 
 - Stale-session fix (0.5.3, [archived plan](plans/archive/2026-10-03-stale-session-unmount.md)):
   manual verification only — mount a BitLocker volume, reboot, launch, and

@@ -1,121 +1,223 @@
 # Distributable app (notarized .dmg + guided setup)
 
 Status: **draft / not started**. Branch: `plan/distributable-app`.
+Revision 2 (2026-10-29): folded in an external read-only review
+(Qoder / DeepSeek-Flash) and a license check of libfuse / macFUSE / FUSE-T.
 
 ## Goal
 
-An average macOS user downloads a `.dmg`, drags **Dislocker UI.app** to
-Applications, double-clicks it, and is walked through one-time dependency
-setup. No git checkout, no hand-typed commands beyond what macOS forces.
+An average macOS user downloads a `.dmg`, installs the app and a signed
+toolchain package, and is walked through the remaining one-time steps
+(FUSE install + approval). No git checkout, no Homebrew, no Xcode.
+
+Honest ceiling: macFUSE's kernel-extension approval can require a reboot
+into Recovery to lower security on Apple Silicon (see
+`scripts/install-root-deps.sh` notes). The UI must say so up front.
 
 Mac App Store distribution is out of scope (sandbox forbids root, raw
 `/dev/disk*`, and spawning `dislocker-fuse`; FUSE cannot ship via the store).
 The maintainer has an Apple Developer Program membership, so **Developer ID
-signing + notarization** is available.
+signing + notarization** (Application and Installer certs) is available.
+
+## Gate
+
+Do not start packaging until the 0.7.0 launcher smoke test in `TO_DO.md`
+**Next Up** passes — this plan reuses that Terminal-attached elevation path.
 
 ## Constraints carried over
 
 - TCC finding from [`double-clickable-app.md`](double-clickable-app.md):
   root spawned via an osascript admin prompt cannot open removable disk
-  nodes. Elevation must stay **Terminal-attached** (`sudo` in Terminal).
-- Do not bundle macFUSE (license forbids redistribution; system extension
-  needs user approval anyway). Do not vendor dislocker sources (AGENTS.md).
+  nodes. Elevation stays **Terminal-attached** (`sudo` in Terminal).
+- As root, the GUI only trusts root-owned tools at fixed paths
+  (`discover_privileged_deps`: `/usr/local/sbin`, `/opt/local/sbin`).
+  Anything installed to `/opt/homebrew/bin` is **invisible** to the root
+  GUI. Setup must therefore produce a root-owned toolchain, not a
+  `brew install`.
+- Do not vendor dislocker **sources** into this repo (AGENTS.md). Building
+  and shipping dislocker / ntfs-3g **binaries** (GPL) with a source offer
+  is allowed and is a separate release artifact.
 - Runtime stays stdlib-only Python.
 
-## Options
+## Licensing findings (2026-10-29, not legal advice)
 
-### A. Packaging (pick one sub-option)
+Checked primary texts: `macfuse/macfuse` LICENSE.txt,
+`macos-fuse-t/fuse-t` License.txt, `macfuse/library` (libfuse fork) repo.
+
+| Component | License | Redistribute in a **free** GPL release? | If **sold** |
+|-----------|---------|----------------------------------------|-------------|
+| macFUSE package (kext, installer, its binaries) | BSD-style + clause 4: no bundling with commercial software, incl. automated download/install, without written permission | Bundling not needed and not planned; link to official installer | Needs written permission even to auto-download/install |
+| macFUSE libfuse **source** (`macfuse/library`) | LGPL-2.1 for the library (`COPYING.LIB`); GPL-2 for utilities | Yes, if we build it ourselves from source: ship notices, source offer, dynamic link (user can replace dylib) | LGPL itself permits it; **unclear** whether macFUSE clause 4 also attaches to the libfuse dylib copied out of macFUSE's binary package — avoid by building from source |
+| FUSE-T binary | Free for non-commercial use; commercial use / bundling needs a commercial license | Link to official installer | Commercial license needed (and "commercial use" may cover users, not only bundling — unverified) |
+| FUSE-T's libfuse | LGPL (fork of osxfuse/fuse) | Yes, with LGPL obligations | Same as left; FUSE-T runtime still needs its license |
+| dislocker | GPL-2.0-or-later (verify at pinned commit) | Yes, binaries + corresponding source | Yes (GPL permits sale), source still required |
+| ntfs-3g | GPL-2 (library LGPL) | Yes, binaries + source | Yes, source required |
+
+Consequences:
+
+- **Today's `install-root-deps.sh` copies macFUSE's libfuse dylib** out of
+  the user's macFUSE install into `$PREFIX/lib`. That is fine on the
+  user's own machine. For a *redistributed* `.pkg`, build libfuse from the
+  `macfuse/library` source at a pinned tag instead of copying macFUSE's
+  binary, so only LGPL terms apply.
+- **Keep the release free** (donations OK) unless written permission is
+  obtained from the macFUSE author and/or a FUSE-T commercial license.
+  Charging money turns "user installs FUSE themselves" into a grey area
+  under both FUSE licenses' "commercial" wording.
+- Never bundle or silently download macFUSE or FUSE-T; the setup panel
+  links to their official pages and the user installs them.
+
+## Architecture (revised)
+
+Release artifact: one notarized `.dmg` containing
+
+1. **`Dislocker UI.app`** — thin launcher + bundled Python (option A1).
+2. **`Dislocker UI Tools.pkg`** — signed (Developer ID Installer) and
+   notarized; installs prebuilt, root-owned `dislocker-fuse`, `ntfs-3g`,
+   and the self-built LGPL libfuse into `/opt/local/sbin` + `/opt/local/lib`
+   (paths the root GUI already trusts). Built in CI from pinned commits
+   with SHA-256-verified sources, mirroring `install-root-deps.sh` build
+   flags (`-DFUSE_DARWIN_ENABLE_EXTENSIONS=0`, fuse3, mbedtls@3 static).
+3. `LICENSES/` + `SOURCE.txt` (source-offer URLs for every GPL/LGPL
+   binary, pointing at tagged source tarballs attached to the release).
+4. Uninstaller script for the pkg payload (pkgutil receipts + file list).
+
+`install-root-deps.sh` stays for source-checkout users; the pkg is the
+download path. Both must produce the same layout.
+
+### A. App packaging options
 
 | Option | How | Pros | Cons |
 |--------|-----|------|------|
-| **A1. Thin launcher .app + bundled Python** (recommended) | `.app/Contents/MacOS/launcher` (shell) runs `open -a Terminal` on a bundled `.command` that `sudo`s the bundled interpreter with `-m dislocker_ui`. Python from python-build-standalone (includes Tk) inside `Contents/Resources/python`. | No dependence on system Python/CLT; no py2app; same proven elevation path | ~40–60 MB; must sign every Mach-O in the runtime; refresh Python for CVEs |
-| A2. Thin launcher .app, system Python | Same launcher, uses `/usr/bin/python3` | Tiny bundle | `/usr/bin/python3` is a CLT stub on clean Macs; Apple Tk is old/buggy |
-| A3. py2app / PyInstaller | Frozen app | Familiar tooling | Plan already rejected: Tk fragility, new build dep; still needs Terminal handoff for elevation |
+| **A1. Thin launcher .app + bundled Python** (recommended) | `Contents/MacOS/launcher` (prefer a tiny signed Mach-O; shell script only if spike shows Gatekeeper accepts it) runs `open -a Terminal` on a bundled `.command`, which verifies the bundle then `sudo`s the bundled interpreter. Python from python-build-standalone (PBS) in `Contents/Resources/python`. | No system Python/CLT; no py2app; proven elevation path | ~40–60 MB; sign every Mach-O; track PBS for CVEs |
+| A2. Launcher .app, system Python | Uses `/usr/bin/python3` | Tiny | CLT stub on clean Macs; old Apple Tk |
+| A3. py2app / PyInstaller | Frozen app | Familiar | Previously rejected (Tk fragility); still needs Terminal handoff |
 
-`run.sh` hardening (root-owned/ non-writable source checks) must be
-re-expressed for the bundle: verify the signed bundle path instead of a
-repo checkout, and refuse if `Contents/` is user-writable when running as
-root. **Security review required** — a root-run interpreter in a
-user-writable `/Applications` copy is the main new risk.
+### Security requirements for the root-run bundle
+
+- **Pinned signature check, before and after sudo.** In the unprivileged
+  `.command` and again as root: `codesign --verify --strict` against a
+  designated requirement pinning our **Team ID** (`-R '=anchor apple
+  generic and certificate leaf[subject.OU] = "<TEAMID>"'`), plus
+  `spctl -a -t exec`. A bare `codesign --verify` accepts any signer.
+  Avoid `--deep`; sign inside-out.
+- **Ownership:** a Finder-dragged app is owned by the user, so a
+  "refuse if user-writable" gate would always fail. Decision: rely on the
+  pinned signature check (tampering breaks the seal) and refuse if the
+  bundle path or any parent is writable by someone other than root or the
+  invoking user. Document the residual TOCTOU window (same class as
+  today's repo checkout); re-verify as root immediately before import.
+- **Sanitized root environment**, mirroring `run.sh` / `elevate.py`:
+  `sudo -- /usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME=…
+  SUDO_UID=… SUDO_GID=… <bundle>/python3 -I -B -m dislocker_ui`
+  (`-I` isolated: ignores `PYTHON*` env and user site; `-B` no
+  `__pycache__` writes, which would also break the signature). No
+  `DYLD_*` passes through (`env -i`; hardened runtime also strips them).
+- **No writes into the bundle** at runtime; ship precompiled `.pyc`
+  inside the signed seal or none at all.
+- **App Translocation:** if launched from the dmg or a quarantined
+  Downloads copy, the path is under `AppTranslocation`; detect and show
+  "Move to Applications first" instead of handing a translocated path
+  to Terminal.
+- **Architecture:** decide arm64-only vs universal2 (PBS has both;
+  combine with `lipo`). Set `LSMinimumSystemVersion` ≥ 12.3 (launcher
+  already relies on `readlink -f`).
 
 ### B. Guided first-run setup
 
-Extend `deps.py` detection into a setup panel shown before the main UI
-when anything is missing (also reachable from Help → Setup):
+New non-GUI module `setup_check.py` returns ordered steps with status;
+`gui.py` renders a setup panel before the main UI (also Help → Setup).
 
-1. **FUSE layer** — detect macFUSE or FUSE-T. Offer buttons that open the
-   official download pages (no bundling). Show the Apple Silicon
-   system-extension approval steps for macFUSE (may require Recovery →
-   reduced security). Prefer FUSE-T if validation below succeeds.
-2. **Homebrew** — detect; if missing, show the official one-line installer
-   with a Copy button (we do not run it for the user).
-3. **dislocker** — show `brew install …` command (tap TBD; upstream
-   formula targets macFUSE). Copy button + Recheck.
-4. **ntfs-3g** — optional, only for RW NTFS.
-5. **Recheck** button; proceed when required deps are present.
-
-Keep the panel logic in a non-GUI module (`setup_check.py`) returning a
-list of steps with status, so it stays testable; `gui.py` only renders.
+1. **FUSE layer** — detect macFUSE (≥4.10 with fuse3) or FUSE-T (if the
+   spike passes). Open the official download page; show the kext approval
+   steps (System Settings → Privacy & Security; Recovery reduced-security
+   on Apple Silicon). Never auto-download.
+2. **Toolchain pkg** — detect root-owned tools in `/opt/local/sbin`.
+   If missing, offer "Open installer" for the bundled `.pkg`.
+3. **Advisory detection** — also look in `/opt/homebrew/bin`,
+   `/usr/local/bin` and report "installed but not trusted (not root-owned
+   in a trusted path)" distinctly from "not installed".
+4. **ntfs-3g** — required for NTFS mounts (included in the pkg).
+5. **Recheck**; proceed when required deps are present.
 
 ### C. (Deferred) SMAppService privileged helper
 
-No Terminal window, true one-click. Requires XPC helper (likely Swift),
-rewrite of `elevate.py`/`privileged.py`, and is **unverified** against the
-TCC removable-volume gate. Not part of this plan.
+No Terminal window. Needs an XPC helper (likely Swift), rewrite of
+`elevate.py` / `privileged.py`; **unverified** against the TCC
+removable-volume gate. Not part of this plan.
 
 ## FUSE-T validation spike
 
-Question: does `dislocker-fuse` built against FUSE-T mount a BitLocker
-volume and expose `dislocker-file` that `ntfs-3g` / `mount_msdos` /
-`mount_exfat` can mount? Web sources claim it works; **unconfirmed**.
+Question: does dislocker built against FUSE-T's libfuse mount a BitLocker
+volume, and can ntfs-3g (also FUSE) and `mount_msdos` / `mount_exfat`
+mount the resulting `dislocker-file`? **Unconfirmed**; ntfs-3g-on-FUSE-T
+has open upstream reports (tuxera/ntfs-3g#130).
 
-**Docker cannot test this.** Docker on macOS runs a Linux VM; FUSE-T is a
-macOS-only NFS/SMB-based FUSE implementation and there are no macOS
-containers. Options:
+Extra concerns from review:
+- FUSE-T serves the filesystem over a **loopback NFS server**. A root-run
+  `dislocker-fuse` would then run that server as root — evaluate
+  exposure (bind address, auth) before recommending it.
+- Adopting FUSE-T needs a second build recipe (no macFUSE `fuse3.pc`,
+  different libfuse), i.e. two toolchain pkgs or a runtime choice.
 
-- **Host test (simplest):** install FUSE-T on the dev Mac alongside / in
-  place of macFUSE, rebuild dislocker against it, run the real-drive
-  smoke test. Risk: perturbs the working macFUSE setup.
-- **macOS VM (isolated):** UTM or `tart` on Apple Silicon (macOS guests
-  are allowed under Apple's license on Apple hardware). USB passthrough
-  of a macOS guest is limited, so test against a **BitLocker image file**
-  (dislocker accepts image files via `-V`). Needs a test image created on
-  Windows (e.g. a small BitLocker-encrypted VHD/raw image with a known
-  throwaway password — never a real key) — store under `tmp/`, not git.
+Environment (Docker cannot run macOS):
+- **Host test on this Mac** (preferred, no Windows needed): install FUSE-T
+  alongside macFUSE; build dislocker/ntfs-3g into a separate prefix under
+  `tmp/` (never over `/usr/local/sbin`). Test with the real drive by
+  pointing the binaries at it directly. Rollback: uninstall FUSE-T; the
+  existing macFUSE toolchain is untouched (coexistence unverified —
+  confirm first).
+- **macOS VM** (tart/UTM) if isolation is wanted; needs a throwaway
+  BitLocker image made on Windows (stored under `tmp/`, never committed).
 
-Spike checklist:
-- [ ] Create throwaway BitLocker test image (NTFS + FAT32/exFAT variants)
-- [ ] Spin up macOS VM (tart/UTM), install FUSE-T + Homebrew
-- [ ] Build dislocker against FUSE-T (record exact flags/patches)
-- [ ] Mount image RO via dislocker-fuse; mount NTFS (ntfs-3g needs FUSE
-      too — check it works on FUSE-T) and FAT/exFAT
-- [ ] Unmount cleanly via `unmount_steps.py` flow
-- [ ] Record result here; decide FUSE-T vs macFUSE as the recommended path
+Checklist:
+- [ ] Confirm FUSE-T + macFUSE coexist
+- [ ] Build dislocker + ntfs-3g against FUSE-T into `tmp/fuse-t-prefix`
+- [ ] RO mount: NTFS via ntfs-3g, FAT/exFAT via system helpers
+- [ ] Clean unmount via `unmount_steps.py` flow
+- [ ] Assess root NFS server exposure
+- [ ] Record result; pick default FUSE layer
 
 ## Release pipeline
 
-- Tag `vX.Y.Z` (matches `VERSION`) → GitHub Actions on `macos-latest`:
-  1. run existing checks
-  2. assemble `.app` (script under `scripts/build-app.sh`)
-  3. `codesign --options runtime --timestamp` all Mach-O + bundle
-     (Developer ID Application cert from Actions secrets as base64 .p12)
-  4. build `.dmg` (`hdiutil`), sign it
-  5. `xcrun notarytool submit --wait` (App Store Connect API key secret),
-     `xcrun stapler staple`
-  6. upload to GitHub Release with `CHANGELOG.md` section as notes
-- Secrets (GitHub Actions, names TBD): Developer ID cert (.p12, base64)
-  and its passphrase; App Store Connect API key ID, issuer ID, and .p8.
-  Never commit them.
-- Optional later: Homebrew cask in a personal tap pointing at the release.
+Tag `vX.Y.Z` (matches `VERSION`) → GitHub Actions `macos` runner:
+
+1. Run existing checks.
+2. Fetch PBS + dislocker + ntfs-3g + libfuse sources at pinned versions;
+   verify SHA-256 (supply chain).
+3. Build toolchain into a staging root; build `.pkg` (`pkgbuild` /
+   `productbuild`), sign with Developer ID Installer.
+4. Assemble `.app` (`scripts/build-app.sh`); CI smoke: bundled
+   `python3 -I -c "import tkinter; tkinter.Tcl()"` and `otool -L` shows
+   no system Tk/Python.
+5. Temporary keychain: create, import cert, `set-key-partition-list`,
+   delete at end. Sign all Mach-O inside-out with
+   `--options runtime --timestamp`, then the bundle.
+6. `hdiutil` dmg (app + pkg + licenses + uninstaller), sign it.
+7. `xcrun notarytool submit --wait` (App Store Connect API key),
+   `xcrun stapler staple`, then `stapler validate` + `spctl -a -vv`.
+8. Upload to a GitHub Release with the `CHANGELOG.md` section, source
+   tarballs, and SHA-256 sums.
+
+Secrets (GitHub Actions, names TBD): Developer ID Application cert and
+Developer ID Installer cert (.p12, base64) and passphrase; App Store
+Connect API key ID, issuer ID, and .p8. Never commit them.
+
+Optional later: Homebrew cask in a personal tap pointing at the release;
+update check (manual re-download for now).
 
 ## Checklist
 
-- [ ] FUSE-T spike (above)
-- [ ] Choose A1 vs A2 (default A1)
-- [ ] `scripts/build-app.sh` + launcher + bundled `.command`
-- [ ] Bundle-aware root hardening (replace repo checks from `run.sh`) +
+- [ ] Gate: 0.7.0 launcher smoke test passes
+- [ ] FUSE-T spike
+- [ ] Decide arm64-only vs universal2
+- [ ] CI toolchain build (pinned, hashed) incl. self-built LGPL libfuse
+- [ ] Signed + notarized toolchain `.pkg` and uninstaller
+- [ ] `scripts/build-app.sh`: Mach-O launcher, bundled `.command`, PBS
+- [ ] Pinned-signature + env sanitization + translocation checks;
       security review
 - [ ] `setup_check.py` + tests; setup panel in `gui.py`; help text
+- [ ] LICENSES / third-party notices / source offer in dmg + release
 - [ ] Local signing + notarization dry run
 - [ ] `release.yml` workflow + secrets
 - [ ] README "Download" section; CHANGELOG + VERSION bump (0.8.0)
@@ -123,8 +225,9 @@ Spike checklist:
 
 ## Risks
 
-- Root-run bundled interpreter: bundle tampering if `/Applications` copy is
-  user-writable. Mitigate with ownership/mode checks and signature check
-  (`codesign --verify`) before `sudo` proceeds.
-- macFUSE extension approval remains a hard UX step if FUSE-T fails.
-- GPL-3.0: binaries must ship with source offer (link to tagged source).
+- Root-run bundled interpreter: tampering mitigated by pinned signature
+  check; residual TOCTOU documented.
+- macFUSE approval remains a hard UX step if FUSE-T fails.
+- License drift: re-check macFUSE / FUSE-T terms each release; do not
+  charge without written permission.
+- Maintaining a second (pkg) build path alongside `install-root-deps.sh`.
