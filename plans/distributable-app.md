@@ -121,9 +121,10 @@ download path. Both must produce the same layout.
   to Terminal.
 - **Architecture: arm64 (Apple Silicon) only** — decided 2026-10-29.
   Apple sold its last Intel Mac in June 2023 and announced macOS 26 as
-  the last Intel-supporting release. Mark the app arm64-only
-  (`LSArchitecturePriority` = arm64, no x86_64 slices) so Intel users get
-  a clear "not supported" rather than a crash. Revisit universal2 only
+  the last Intel-supporting release. Ship only arm64 slices (launcher,
+  PBS, toolchain) so macOS itself refuses to launch on Intel; add a
+  pkg `hostArchitectures="arm64"` check and state it on the download
+  page. Revisit universal2 only
   on user demand. Set `LSMinimumSystemVersion` ≥ 12.3 (launcher
   already relies on `readlink -f`).
 
