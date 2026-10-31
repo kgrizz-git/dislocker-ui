@@ -29,8 +29,9 @@ Open work only for **dislocker-ui**.
 
 ## Active
 
-- Distributable app ([plan](plans/distributable-app.md)), gated on the
-  launcher smoke test: FUSE-T spike (host, separate prefix), signed
+- Distributable app ([plan](plans/distributable-app.md)) — **not
+  started; blocked** until the 0.7.0 launcher smoke test in Next Up
+  passes (still pending). Then: FUSE-T spike (host, separate prefix), signed
   toolchain `.pkg` (self-built LGPL libfuse), launcher app + bundled
   Python with pinned-signature checks, setup panel, notarized release
   workflow. Keep releases free (FUSE licenses restrict commercial use).

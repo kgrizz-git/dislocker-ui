@@ -78,8 +78,14 @@ Release artifact: one notarized `.dmg` containing
    (paths the root GUI already trusts). Built in CI from pinned commits
    with SHA-256-verified sources, mirroring `install-root-deps.sh` build
    flags (`-DFUSE_DARWIN_ENABLE_EXTENSIONS=0`, fuse3, mbedtls@3 static).
-3. `LICENSES/` + `SOURCE.txt` (source-offer URLs for every GPL/LGPL
-   binary, pointing at tagged source tarballs attached to the release).
+3. `LICENSES/` + `SOURCE.txt`: license texts and attribution for every
+   shipped component, and source-offer URLs for every GPL/LGPL binary
+   (tagged source tarballs attached to the release). **mbedtls@3** is
+   statically linked into dislocker and is dual-licensed Apache-2.0 OR
+   GPL-2.0-or-later (verify at the pinned version): ship under the
+   GPL-2.0-or-later option, matching the GPL toolchain, with its
+   copyright notice and a source-offer entry for the exact mbedtls
+   version used.
 4. Uninstaller script for the pkg payload (pkgutil receipts + file list).
 
 `install-root-deps.sh` stays for source-checkout users; the pkg is the
@@ -113,6 +119,10 @@ download path. Both must produce the same layout.
   (`-I` isolated: ignores `PYTHON*` env and user site; `-B` no
   `__pycache__` writes, which would also break the signature). No
   `DYLD_*` passes through (`env -i`; hardened runtime also strips them).
+  Because `-I` ignores `PYTHONPATH`, the build must **install
+  `dislocker_ui` into the bundled interpreter's `site-packages`**
+  (`<bundle>/python3 -m pip install --no-deps --no-compile .` at build
+  time, before signing) so `-m dislocker_ui` resolves inside the seal.
 - **No writes into the bundle** at runtime; ship precompiled `.pyc`
   inside the signed seal or none at all.
 - **App Translocation:** if launched from the dmg or a quarantined
@@ -185,15 +195,26 @@ Checklist:
 
 ## Release pipeline
 
-Tag `vX.Y.Z` (matches `VERSION`) → GitHub Actions `macos` runner:
+Tag `vX.Y.Z` (matches `VERSION`) → GitHub Actions on an **arm64** macOS
+runner (`macos-15`, Apple Silicon; pin the label, don't use
+`macos-latest`, and don't use `-intel`/`-large` labels which are x86_64):
 
+0. Assert `[ "$(uname -m)" = arm64 ]`; fail the job otherwise, before
+   checks or builds run.
 1. Run existing checks.
-2. Fetch PBS + dislocker + ntfs-3g + libfuse sources at pinned versions;
-   verify SHA-256 (supply chain).
+2. Fetch PBS + dislocker + ntfs-3g + libfuse + **mbedtls@3** sources at
+   pinned versions; verify SHA-256 (supply chain). mbedtls comes from
+   the official **source tarball** (not Homebrew), built static, with
+   its version + SHA-256 recorded next to the others in a
+   `scripts/deps.lock`-style manifest; CMake/pkg-config may come from
+   the runner image (build-time only, not shipped).
 3. Build toolchain into a staging root; build `.pkg` (`pkgbuild` /
    `productbuild`), sign with Developer ID Installer.
-4. Assemble `.app` (`scripts/build-app.sh`); CI smoke: bundled
-   `python3 -I -c "import tkinter; tkinter.Tcl()"` and `otool -L` shows
+4. Assemble `.app` (`scripts/build-app.sh`); CI smoke with the bundled
+   interpreter: `python3 -I -c "import tkinter as t; r = t.Tk();
+   r.destroy()"` (loads Tk, not just Tcl; GitHub macOS runners have a
+   window server session), `python3 -I -c "import dislocker_ui"`
+   (packaged module resolves from site-packages), and `otool -L` shows
    no system Tk/Python.
 5. Temporary keychain: create, import cert, `set-key-partition-list`,
    delete at end. Sign all Mach-O inside-out with
