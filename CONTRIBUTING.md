@@ -53,7 +53,8 @@ hooks/              # local policy scripts (absolute-path / line-count)
 
 ## Developer checks
 
-Runtime needs no pip packages. Optional lint/hooks:
+Runtime needs no pip packages. Optional lint/hooks (`[dev]` pins in
+`pyproject.toml` for reproducible installs and Dependabot version updates):
 
 ```bash
 pip install -e ".[dev]"   # ruff, pre-commit, pytest, pip-audit
