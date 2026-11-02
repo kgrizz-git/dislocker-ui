@@ -182,6 +182,9 @@ Version numbers match `VERSION` / SemVer with the public changelog.
 
 - Extracted privileged staging/session policy from `runner.py` and tightened
   the source-file hard cap from 800 to 750 lines.
+- Dependabot version updates: monthly (first of the month), with minor/patch
+  updates grouped per ecosystem; major updates remain separate PRs. Seven-day
+  cooldown unchanged.
 
 ## [0.3.1] - 2026-08-05
 

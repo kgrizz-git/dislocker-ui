@@ -1,13 +1,15 @@
 # Dependabot version updates (security updates are enabled separately in repo settings).
 # Docs: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates
+#
+# Monthly interval: Dependabot runs on the first day of each month (no day field).
+# Groups: minor and patch updates are batched; major updates stay one PR per dependency.
 
 version: 2
 updates:
   - package-ecosystem: pip
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     # Delay version bumps after a new release (Semgrep / supply-chain hygiene).
     cooldown:
       default-days: 7
@@ -16,12 +18,19 @@ updates:
       - dependencies
     commit-message:
       prefix: "deps"
+    groups:
+      minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     cooldown:
       default-days: 7
     open-pull-requests-limit: 5
@@ -29,3 +38,11 @@ updates:
       - dependencies
     commit-message:
       prefix: "ci"
+    groups:
+      minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
