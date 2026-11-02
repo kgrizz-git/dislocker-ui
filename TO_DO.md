@@ -29,6 +29,13 @@ Open work only for **dislocker-ui**.
 
 ## Active
 
+- Distributable app ([plan](plans/distributable-app.md)) — **not
+  started; blocked** until the 0.7.0 launcher smoke test in Next Up
+  passes (still pending). Then: FUSE-T spike (host, separate prefix), signed
+  toolchain `.pkg` (self-built LGPL libfuse), launcher app + bundled
+  Python with pinned-signature checks, setup panel, notarized release
+  workflow. Keep releases free (FUSE licenses restrict commercial use).
+
 - Stale-session fix (0.5.3, [archived plan](plans/archive/2026-10-03-stale-session-unmount.md)):
   manual verification only — mount a BitLocker volume, reboot, launch, and
   confirm Mount self-heals (or Unmount clears) with no eject of unrelated
