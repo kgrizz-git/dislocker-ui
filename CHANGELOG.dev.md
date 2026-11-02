@@ -184,7 +184,9 @@ Version numbers match `VERSION` / SemVer with the public changelog.
   the source-file hard cap from 800 to 750 lines.
 - Dependabot version updates: monthly (first of the month), with minor/patch
   updates grouped per ecosystem; major updates remain separate PRs. Seven-day
-  cooldown unchanged.
+  cooldown unchanged. Added `pre-commit` ecosystem for `.pre-commit-config.yaml`
+  hook revs; pinned `[dev]` and build `setuptools` in `pyproject.toml` so pip
+  version updates (and the dependency graph) track exact tooling versions.
 
 ## [0.3.1] - 2026-08-05
 
