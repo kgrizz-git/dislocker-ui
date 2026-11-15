@@ -7,7 +7,7 @@ Open work only for **dislocker-ui**.
 - Add new work here when it is actually queued.
 - Link the matching plan under [`plans/`](plans/) when one exists.
 - **When an item is finished, delete it from this file** — do not accumulate checked-off history here.
-- When an entire plan is finished, move it to [`plans/archive/`](plans/archive/) and remove its section below.
+- When an entire plan is finished, move it to [`plans/archive/`](plans/archive/) in the pull request that implements it, before that pull request merges, and remove its section below. Do not commit that archive on `main` afterward.
 - User-visible completions also need `VERSION` + [`CHANGELOG.md`](CHANGELOG.md); harness-only notes go in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 - See [`plans/README.md`](plans/README.md) for the full plans workflow.
 

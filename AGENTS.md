@@ -54,7 +54,7 @@ Workflow for agents:
 
 1. Multi-step work → write/update a plan under `plans/` and mirror open items in `TO_DO.md`.
 2. Finish an item → **remove it from `TO_DO.md`** (and check it off in the plan if useful).
-3. Finish a whole plan → move `plans/<name>.md` to `plans/archive/` (prefer `YYYY-MM-DD-<slug>.md`), clear its TO_DO section, update the right changelog.
+3. Finish a whole plan → move `plans/<name>.md` to `plans/archive/YYYY-MM-DD-<slug>.md` in the pull request that implements it, before that pull request merges. Do not commit that archive on `main` afterward. Clear its TO_DO section and update the right changelog. Details: [`plans/README.md`](plans/README.md).
 4. Never commit secrets, recovery keys, or machine-specific home paths in plans or TO_DO.
 
 Pending manual smoke tests: at the start of a session, check `TO_DO.md`

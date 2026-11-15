@@ -17,6 +17,12 @@ Version numbers match `VERSION` / SemVer with the public changelog.
   dialog stub the root-owned-interpreter check, because CI's Python is
   not root-owned; a separate test covers that refusal.
 
+### Changed
+
+- `plans/README.md` states that a finished plan is archived in the pull
+  request that implements it, before merge. The elevation checkout seal
+  plan is archived after PR #24.
+
 ## [0.7.0] - 2026-10-17
 
 ### Changed

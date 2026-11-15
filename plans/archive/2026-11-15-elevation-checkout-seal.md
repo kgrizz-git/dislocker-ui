@@ -1,6 +1,6 @@
 # Elevation checkout seal
 
-**Status:** Implemented on `fix/elevation-checkout-seal` (0.7.1). Not merged.
+**Status:** Shipped in 0.7.1 (PR #24). Archived 2026-11-15.
 
 The administrator dialog waits up to 600 seconds after the unprivileged
 parent has inspected `src/`. The authorized command used to bind only the

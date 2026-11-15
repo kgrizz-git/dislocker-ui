@@ -18,8 +18,8 @@ Tracked implementation plans for **dislocker-ui**.
 2. **Mirror open checklist items** into root [`TO_DO.md`](../TO_DO.md). Link the plan from the TO_DO section.
 3. **While working**, check off items in the plan file if useful; keep `TO_DO.md` as the live queue.
 4. **When a checklist item is done**, remove it from `TO_DO.md` (do not leave a long history of completed checkboxes there).
-5. **When the whole plan is done** (merged / released / abandoned):
-   - Move `plans/<name>.md` → `plans/archive/<name>.md` (optionally prefix with completion date: `2026-07-31-macos-elevation.md`).
+5. **Archive a finished plan in the pull request that implements it**, before that pull request merges. `main` receives the archive only through that merge. Do not add a follow-up commit on `main` to archive a plan after its pull request has merged. An abandoned plan is archived in its own small pull request.
+   - Move `plans/<name>.md` → `plans/archive/YYYY-MM-DD-<name>.md` (the date is the day the implementing pull request is ready, or the day the plan is abandoned).
    - Strip any remaining TO_DO entries for that plan.
    - Record user-visible impact in `CHANGELOG.md` + `VERSION`; harness-only notes in `CHANGELOG.dev.md`.
 6. **Do not** put secrets, recovery keys, or machine-specific home paths in plans.
@@ -27,8 +27,6 @@ Tracked implementation plans for **dislocker-ui**.
 
 ## Active plans
 
-- [`elevation-checkout-seal.md`](elevation-checkout-seal.md) — bind the
-  administrator dialog to the checkout bytes before root imports them.
 - [`double-clickable-app.md`](double-clickable-app.md) — `.command`
   Terminal-attached launcher (shipped in 0.7.0; manual verification
   pending).
