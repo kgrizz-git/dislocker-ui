@@ -21,9 +21,12 @@ Inputs:
 Outputs:
   :func:`measure` returns a sha256 hex digest. :func:`materialize` returns a
   mode-0700 directory whose ``.py`` / ``.pyc`` / ``.so`` bytes match that
-  digest, or ``None`` when the root is a root-owned system install that the
-  user cannot rewrite. The bootstrap exits 2 on a seal failure and otherwise
-  returns the privileged ``main()`` status.
+  digest. A root-owned ``site-packages`` tree is not exempt: only the
+  ``dislocker_ui`` package is hashed and copied, and that copy is what root
+  imports. When this process is root, that directory is created under a
+  root-owned parent, not the caller's temporary directory (the caller can
+  rename entries there). The bootstrap exits 2 on a seal failure and
+  otherwise returns the privileged ``main()`` status.
 
 Requirements:
   Python 3.10+. Standard library only. No imports from ``dislocker_ui`` — this
@@ -58,9 +61,15 @@ PRUNE_DIR_NAMES = frozenset(
     }
 )
 _IMPORT_SUFFIXES = frozenset({".py", ".pyc", ".so"})
+_INSTALL_ROOT_NAMES = frozenset({"site-packages", "dist-packages"})
+_PACKAGE_DIR = "dislocker_ui"
 _PRIVILEGED_MODULE = "dislocker_ui.privileged"
 _SHA256_RE_LENGTH = 64
 _PRIVATE_PREFIX = "dislocker-ui-seal-"
+# Existing root homes. The elevated child inherits the caller's TMPDIR, and
+# rename permission belongs to that parent directory, so the copy must not
+# be created there. These paths are used only when the process is root.
+_ROOT_SEAL_PARENTS = ("/private/var/root", "/var/root", "/root")
 # Run by `python -I -S -c`. Isolated mode ignores PYTHONPATH so a module
 # planted next to the checkout cannot shadow the stdlib before this runs.
 BOOTSTRAP_STUB = "import base64,sys; exec(base64.b64decode(sys.argv[1]), {'__name__': '__main__'})"
@@ -104,35 +113,6 @@ def _rel(root: Path, path: Path) -> str:
     return rel
 
 
-def is_system_managed(src_root: Path) -> bool:
-    """True for a root-owned, non-writable ``site-packages`` or ``dist-packages``.
-
-    A user-owned directory that merely uses one of those names is a checkout
-    and is measured in full. The caller still re-checks on the root side.
-    """
-    if src_root.name not in {"site-packages", "dist-packages"}:
-        return False
-    try:
-        info = src_root.lstat()
-    except OSError:
-        return False
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
-        return False
-    writable = stat.S_IMODE(info.st_mode) & 0o022
-    return info.st_uid == 0 and writable == 0
-
-
-def system_digest(src_root: Path) -> str:
-    """Digest the identity of a root-owned install, not every neighboring package."""
-    if not is_system_managed(src_root):
-        raise SealError(f"source root is not a root-owned system install ({src_root})")
-    info = src_root.lstat()
-    payload = (
-        f"system-managed\n{info.st_uid}\n{stat.S_IMODE(info.st_mode):04o}\n{src_root.resolve()}\n"
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
-
 def _real_source_root(src_root: Path) -> Path:
     """Resolve *src_root* after refusing a symlink or a non-directory."""
     if src_root.is_symlink():
@@ -144,30 +124,21 @@ def _real_source_root(src_root: Path) -> Path:
 
 def measure(src_root: Path) -> str:
     """Return the sha256 the authorized command must carry for *src_root*."""
-    root = _real_source_root(src_root)
-    if is_system_managed(root):
-        return system_digest(root)
-    digest, _files = _read_checkout(root)
+    digest, _files = _read_checkout(_real_source_root(src_root))
     return digest
 
 
-def materialize(src_root: Path, expected: str) -> Path | None:
+def materialize(src_root: Path, expected: str) -> Path:
     """Re-measure *src_root* and copy a matching checkout into a private directory.
 
-    Returns ``None`` for a root-owned system install (import that path itself).
     Raises :class:`SealError` when the digest does not match or the tree is
     not safe. The copy contains the bytes that were hashed, so a rewrite of
-    the checkout after the read cannot change what gets imported.
+    the checkout after the read cannot change what gets imported. Root always
+    imports that copy, including when *src_root* is a system ``site-packages``.
     """
     if not _valid_digest(expected):
         raise SealError("checkout digest is invalid")
-    root = _real_source_root(src_root)
-    if is_system_managed(root):
-        actual = system_digest(root)
-        if not _matches(actual, expected):
-            raise SealError("system install no longer matches the authorized digest")
-        return None
-    digest, files = _read_checkout(root)
+    digest, files = _read_checkout(_real_source_root(src_root))
     if not _matches(digest, expected):
         raise SealError("checkout changed after administrator approval")
     return _write_private(files)
@@ -178,6 +149,10 @@ def _read_checkout(root: Path) -> tuple[str, list[tuple[str, bytes]]]:
     records: list[str] = []
     files: list[tuple[str, bytes]] = []
     _scan_dir(root, root, records, files)
+    if root.name in _INSTALL_ROOT_NAMES and not any(
+        rel.startswith(f"{_PACKAGE_DIR}/") for rel, _data in files
+    ):
+        raise SealError("dislocker_ui package is not in the install")
     records.sort()
     text = "\n".join(records) + "\n"
     return hashlib.sha256(text.encode("utf-8")).hexdigest(), files
@@ -223,6 +198,14 @@ def _consider_entry(
     """Record one directory entry, or skip pruned and non-importable names."""
     name = entry.name
     if name in PRUNE_DIR_NAMES or name.endswith(".egg-info"):
+        return
+    # A system install's other projects are not copied onto the import path.
+    # The dislocker_ui package itself is still hashed, including its symlinks.
+    if (
+        root.name in _INSTALL_ROOT_NAMES
+        and Path(entry.path).parent == root
+        and name != _PACKAGE_DIR
+    ):
         return
     if entry.is_symlink():
         _refuse_or_skip_symlink(entry)
@@ -287,15 +270,83 @@ def _read_importable(
     files.append((_rel(root, path), data))
 
 
+def _is_private_parent(path: Path, *, owner: int) -> bool:
+    """True when *path* is a real directory owned by *owner* and not group/world-writable."""
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        return False
+    return info.st_uid == owner and (stat.S_IMODE(info.st_mode) & 0o022) == 0
+
+
+def _private_parent() -> str | None:
+    """Return a root-owned directory for the copy, or None when this process is not root.
+
+    ``tempfile`` follows the inherited ``TMPDIR``. After the administrator
+    dialog that directory belongs to the invoking user, who can rename a
+    root-owned child inside it. Refuse to fall back to that directory.
+    """
+    if os.geteuid() != 0:
+        return None
+    for candidate in _ROOT_SEAL_PARENTS:
+        if _is_private_parent(Path(candidate), owner=0):
+            return candidate
+    raise SealError("no root-owned directory for the private checkout copy")
+
+
+def _dir_identity(path: Path) -> os.stat_result:
+    """Return ``lstat`` of a real mode-0700 directory, or raise :class:`SealError`.
+
+    ``mkdtemp`` requests mode 0700, but umask can only clear bits, so a
+    restrictive umask produces a different mode. Refuse that instead of
+    calling chmod: 0700 is owner-only, and 0644 would not be traversable.
+    """
+    try:
+        info = os.lstat(path)
+    except OSError as exc:
+        raise SealError(f"cannot inspect private seal directory ({exc})") from exc
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISDIR(info.st_mode)
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise SealError("private seal directory is not mode 0700")
+    return info
+
+
+def _same_directory(path: Path, identity: os.stat_result) -> None:
+    """Raise when *path* is no longer the directory *identity* described."""
+    info = _dir_identity(path)
+    if info.st_dev != identity.st_dev or info.st_ino != identity.st_ino:
+        raise SealError("private seal directory changed before import")
+
+
+def _discard_private(dest: Path) -> None:
+    """Remove a seal directory this process created. Do not follow a symlink."""
+    try:
+        info = os.lstat(dest)
+    except OSError:
+        return
+    if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+        return
+    try:
+        os.rmdir(dest)
+    except OSError:
+        shutil.rmtree(dest, ignore_errors=True)
+
+
 def _write_private(files: list[tuple[str, bytes]]) -> Path:
     """Write *files* into a new mode-0700 directory and return that directory."""
-    dest = Path(tempfile.mkdtemp(prefix=_PRIVATE_PREFIX))
-    os.chmod(dest, 0o700)
+    dest = Path(tempfile.mkdtemp(prefix=_PRIVATE_PREFIX, dir=_private_parent()))
     try:
+        identity = _dir_identity(dest)
         for rel, data in files:
             _write_sealed_file(dest, rel, data)
+        _same_directory(dest, identity)
     except Exception:
-        shutil.rmtree(dest, ignore_errors=True)
+        _discard_private(dest)
         raise
     return dest
 
@@ -386,13 +437,14 @@ def _run_bootstrap() -> int:
 def _launch(src: Path, expected: str, module: str, rest: list[str]) -> int:
     """Import *module* from the sealed tree and return ``main()``."""
     private = materialize(src, expected)
-    entry = str(src.resolve() if private is None else private)
+    entry = str(private)
     user_root = str(src.resolve())
     os.environ.pop("PYTHONPATH", None)
     os.environ.pop("PYTHONHOME", None)
-    sys.path = [entry, *[p for p in sys.path if p not in {"", entry, user_root}]]
-    sys.argv = [module, *rest]
     try:
+        _dir_identity(private)
+        sys.path = [entry, *[p for p in sys.path if p not in {"", entry, user_root}]]
+        sys.argv = [module, *rest]
         imported = importlib.import_module(module)
         main = getattr(imported, "main", None)
         if not callable(main):
@@ -400,8 +452,7 @@ def _launch(src: Path, expected: str, module: str, rest: list[str]) -> int:
         code = main()
         return int(code) if code is not None else 0
     finally:
-        if private is not None:
-            shutil.rmtree(private, ignore_errors=True)
+        _discard_private(private)
 
 
 if __name__ == "__main__":

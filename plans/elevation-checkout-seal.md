@@ -17,11 +17,16 @@ same-mode rewrite of a user-owned module during the wait became root code.
   with that source, not `python -m`.
 - The seal re-measures the tree. On a match it copies those bytes into a
   mode-0700 directory and imports from the copy. A mismatch exits 2 and
-  does not import the package.
+  does not import the package. When the process is root, that directory's
+  parent is an existing root-owned directory (`/private/var/root`,
+  `/var/root`, or `/root`), not the caller's `TMPDIR`. The seal checks
+  the copy's device and inode again after writing it.
 - Refuse importable symlinks and symlink directories, matching `run.sh`.
 - Refuse the dialog when the Python interpreter, or any ancestor, is not
   root-owned and free of group/world write. `sudo ./run.sh` remains the
   path for pyenv and user-owned Homebrew.
+- Do not skip file bytes because `site-packages` is root-owned. Seal the
+  `dislocker_ui` package and import the private copy.
 
 ## Checklist
 
@@ -30,3 +35,5 @@ same-mode rewrite of a user-owned module during the wait became root code.
 - [x] Bootstrap test: a rewritten module is not executed.
 - [x] Bootstrap test: a match imports the private copy, then deletes it.
 - [x] User-owned interpreter never reaches `osascript`.
+- [x] Root creates the private copy outside the caller's temporary directory.
+- [x] An install root imports the private package copy; a missing package is refused.

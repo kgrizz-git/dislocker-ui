@@ -12,7 +12,8 @@ Version numbers match `VERSION` / SemVer with the public changelog.
 
 - `checkout_seal.py` and `tests/test_checkout_seal.py`: the dialog path
   binds a checkout digest and re-checks it in a fresh `-I -S` interpreter
-  before importing the package. Elevation tests that drive a successful
+  before importing the package. The authorized command does not pass
+  `-P`, which Python 3.10 rejects. Elevation tests that drive a successful
   dialog stub the root-owned-interpreter check, because CI's Python is
   not root-owned; a separate test covers that refusal.
 

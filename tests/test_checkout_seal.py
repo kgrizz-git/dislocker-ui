@@ -29,9 +29,11 @@ from dislocker_ui.checkout_seal import (
     PRUNE_DIR_NAMES,
     SealError,
     _assert_root_owned_chain,
+    _is_private_parent,
+    _private_parent,
+    _same_directory,
     assert_root_owned_interpreter,
     bootstrap_main,
-    is_system_managed,
     materialize,
     measure,
 )
@@ -39,9 +41,14 @@ from dislocker_ui.elevate import _NON_CODE_DIRS
 
 
 def _chmod_tree(root: Path) -> None:
-    """Force directory 0755 and file 0644 so the seal's writable check passes."""
+    """Force directory 0755 and file 0644 so the seal's writable check passes.
+
+    0755 is the normal traversable directory mode (no group or other write).
+    Bandit B103 treats that mask as permissive because it assumes a file.
+    """
     for dirpath, _dirnames, filenames in os.walk(root):
-        os.chmod(dirpath, 0o755)
+        # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions -- directory must be traversable and not group-writable
+        os.chmod(dirpath, 0o755)  # nosec B103
         for name in filenames:
             os.chmod(Path(dirpath) / name, 0o644)
 
@@ -67,7 +74,6 @@ def _spawn(
         "-I",
         "-S",
         "-s",
-        "-P",
         "-c",
         BOOTSTRAP_STUB,
         payload,
@@ -188,7 +194,7 @@ def test_embedded_source_measures_like_the_imported_module(tmp_path: Path) -> No
     """The bytes embedded in the authorized command implement the same digest."""
     root = _checkout(tmp_path)
     namespace: dict[str, object] = {"__name__": "seal_copy"}
-    exec(EMBEDDED_SOURCE, namespace)
+    exec(EMBEDDED_SOURCE, namespace)  # nosec B102 — run the seal source captured at import
     embedded_measure = namespace["measure"]
     assert callable(embedded_measure)
     assert embedded_measure(root) == measure(root)
@@ -272,15 +278,58 @@ def test_symlink_or_file_source_root_is_refused(tmp_path: Path) -> None:
         measure(leaf)
 
 
-def test_user_owned_site_packages_is_still_measured(tmp_path: Path) -> None:
-    """A directory named site-packages is sealed unless root owns it."""
+def test_install_root_seals_package_bytes_not_sibling_projects(tmp_path: Path) -> None:
+    """site-packages is not trusted as a directory. Only dislocker_ui bytes count."""
     root = tmp_path / "site-packages"
     pkg = root / "dislocker_ui"
     pkg.mkdir(parents=True)
-    (pkg / "__init__.py").write_text("x = 1\n", encoding="utf-8")
+    init = pkg / "__init__.py"
+    init.write_text("x = 1\n", encoding="utf-8")
+    sibling = root / "other.py"
+    sibling.write_text("y = 1\n", encoding="utf-8")
     _chmod_tree(root)
-    assert is_system_managed(root) is False
-    assert len(measure(root)) == 64
+    sibling.chmod(0o666)
+    first = measure(root)
+    sibling.write_text("y = 2\n", encoding="utf-8")
+    assert measure(root) == first
+    init.write_text("x = 2\n", encoding="utf-8")
+    init.chmod(0o644)
+    assert measure(root) != first
+
+
+@pytest.mark.parametrize("name", ["site-packages", "dist-packages"])
+def test_install_root_without_the_package_is_refused(tmp_path: Path, name: str) -> None:
+    """An install root that does not contain dislocker_ui is not an empty seal."""
+    root = tmp_path / name
+    root.mkdir()
+    (root / "other.py").write_text("x = 1\n", encoding="utf-8")
+    _chmod_tree(root)
+    with pytest.raises(SealError, match="not in the install"):
+        measure(root)
+
+
+def test_bootstrap_imports_the_private_copy_of_an_install(tmp_path: Path) -> None:
+    """A site-packages root still imports the sealed package, not the live tree."""
+    marker = tmp_path / "loaded"
+    root = tmp_path / "site-packages"
+    package = root / "dislocker_ui"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "privileged.py").write_text(
+        "def main():\n"
+        "    from pathlib import Path\n"
+        f"    Path({str(marker)!r}).write_text(Path(__file__).resolve().as_posix())\n"
+        "    return 0\n",
+        encoding="utf-8",
+    )
+    (root / "other.py").write_text("SENTINEL = True\n", encoding="utf-8")
+    _chmod_tree(root)
+    proc = _spawn(root, measure(root))
+    assert proc.returncode == 0, proc.stderr
+    loaded = Path(marker.read_text(encoding="utf-8"))
+    assert "dislocker-ui-seal-" in loaded.as_posix()
+    assert not loaded.is_relative_to(root)
+    assert not loaded.exists()
 
 
 def test_bootstrap_main_rejects_bad_argv(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -337,3 +386,89 @@ def test_root_owned_chain_accepts_only_nonwritable_root_path(
     monkeypatch.setattr("dislocker_ui.checkout_seal.os.lstat", _as(stat.S_IFREG | 0o775))
     with pytest.raises(SealError, match="root-owned"):
         _assert_root_owned_chain(resolved)
+
+
+def test_root_does_not_seal_inside_the_caller_temp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A root process refuses a parent the invoking user can rename."""
+    parent = tmp_path / "caller-temp"
+    parent.mkdir()
+    assert _is_private_parent(parent, owner=os.getuid())
+    assert not _is_private_parent(parent, owner=0)
+    writable = tmp_path / "group-writable"
+    writable.mkdir()
+    # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions -- directory write bit is the case under test
+    writable.chmod(0o775)  # nosec B103
+    assert not _is_private_parent(writable, owner=os.getuid())
+    link = tmp_path / "linked-parent"
+    link.symlink_to(parent, target_is_directory=True)
+    assert not _is_private_parent(link, owner=os.getuid())
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setattr("dislocker_ui.checkout_seal._ROOT_SEAL_PARENTS", (str(parent),))
+    with pytest.raises(SealError, match="root-owned"):
+        _private_parent()
+    root = _checkout(tmp_path / "tree")
+    before = list(parent.glob("dislocker-ui-seal-*"))
+    with pytest.raises(SealError, match="root-owned"):
+        materialize(root, measure(root))
+    assert list(parent.glob("dislocker-ui-seal-*")) == before
+
+
+def test_private_copy_uses_the_verified_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The seal directory is created under the parent the root check selected."""
+    parent = tmp_path / "root-home"
+    parent.mkdir()
+    monkeypatch.setattr("dislocker_ui.checkout_seal._private_parent", lambda: str(parent))
+    root = _checkout(tmp_path / "tree")
+    private = materialize(root, measure(root))
+    try:
+        assert private.parent == parent
+        assert private.name.startswith("dislocker-ui-seal-")
+        assert stat.S_IMODE(private.stat().st_mode) == 0o700
+    finally:
+        import shutil
+
+        shutil.rmtree(private)
+
+
+def test_replaced_private_directory_is_refused(tmp_path: Path) -> None:
+    """A directory swapped onto the seal path is not the one that was created."""
+    directory = tmp_path / "seal"
+    directory.mkdir(mode=0o700)
+    info = directory.lstat()
+    assert stat.S_IMODE(info.st_mode) == 0o700
+    _same_directory(directory, info)
+    replaced = os.stat_result(
+        (
+            info.st_mode,
+            info.st_ino + 1,
+            info.st_dev,
+            info.st_nlink,
+            info.st_uid,
+            info.st_gid,
+            info.st_size,
+            info.st_atime,
+            info.st_mtime,
+            info.st_ctime,
+        )
+    )
+    with pytest.raises(SealError, match="changed"):
+        _same_directory(directory, replaced)
+
+
+def test_private_directory_refuses_a_mode_other_than_0700(tmp_path: Path) -> None:
+    """A umask that clears the owner bits is a failed seal, not a chmod."""
+    root = _checkout(tmp_path)
+    digest = measure(root)
+    parent = Path(tempfile.gettempdir())
+    before = set(parent.glob("dislocker-ui-seal-*"))
+    previous = os.umask(0o777)
+    try:
+        with pytest.raises(SealError, match="mode 0700"):
+            materialize(root, digest)
+    finally:
+        os.umask(previous)
+    assert set(parent.glob("dislocker-ui-seal-*")) == before

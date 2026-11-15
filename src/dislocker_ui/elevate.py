@@ -202,9 +202,10 @@ def prepare_elevation_paths() -> tuple[Path, Path]:
     # Reject group/world-writable .py files: an attacker with group-write on
     # the checkout could trojan a module that root imports via PYTHONPATH.
     # Scan src_root (the actual PYTHONPATH entry), not just package_dir, so a
-    # writable sibling like src/os.py is also caught.  Skip for pip-installed
-    # packages where site-packages is the root (pip controls file modes, and
-    # scanning site-packages recursively would be prohibitively slow).
+    # writable sibling like src/os.py is also caught. A root-owned
+    # site-packages skips this walk because scanning every installed project
+    # is slow. That skip is not a trust decision: the path check above still
+    # ran, and _run_osascript seals the dislocker_ui package before the dialog.
     _assert_no_writable_py_files(src_root)
     # Content replacement and importable symlinks are sealed immediately
     # before the dialog, inside _run_osascript, and again in the root child.
@@ -423,11 +424,12 @@ def _check_unclassified_entry(entry: Path) -> None:
 
 
 def _is_system_managed_install(src_root: Path) -> bool:
-    """True when *src_root* is a root-owned pip-managed site-packages directory.
+    """True when the pre-dialog walk would scan a root-owned install tree.
 
-    In that case the package manager owns file integrity and a recursive scan
-    would be too slow to run before every elevation.  A user-controlled
-    directory merely named ``site-packages`` is not exempt.
+    The walk is skipped because scanning every project in site-packages is
+    slow. It does not treat those files as trusted: the checkout seal hashes
+    the ``dislocker_ui`` package and the root child imports a private copy.
+    A user-controlled directory merely named ``site-packages`` is not skipped.
     """
     if src_root.name not in ("site-packages", "dist-packages"):
         return False
@@ -472,6 +474,8 @@ def build_privileged_shell_command(
     """
     Assemble ``cd / && python -I -S -c <seal> …`` (no ``python -m``).
 
+    ``-P`` is omitted: Python 3.10 rejects it, and ``cd /`` plus the seal's
+    path filter already keep the working directory off ``sys.path``.
     Each argv token is shlex-quoted; the result is NOT yet AppleScript-escaped.
     The checkout digest and the seal source are part of the command the
     administrator approves. The root process runs that seal before it imports
@@ -496,7 +500,6 @@ def build_privileged_shell_command(
         "-I",
         "-S",
         "-s",
-        "-P",
         "-c",
         BOOTSTRAP_STUB,
         payload,

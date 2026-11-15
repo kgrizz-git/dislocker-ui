@@ -78,7 +78,6 @@ def test_quoting_handles_spaces_quotes_dollar_backticks(tmp_path: Path) -> None:
     )
     assert "cd / &&" in cmd
     assert "-s" in cmd
-    assert "-P" in cmd
     assert "dislocker_ui.privileged" in cmd
     # After shlex.quote the dangerous characters are inside single quotes.
     assert "$" in cmd or "'$" in cmd or "\\$" in cmd
@@ -440,12 +439,12 @@ def test_privileged_command_binds_checkout_and_does_not_use_python_m(tmp_path: P
     )
     tokens = shlex.split(cmd.removeprefix("cd / && "))
     assert tokens[0] == str(Path(sys.executable).resolve())
-    assert tokens[1:5] == ["-I", "-S", "-s", "-P"]
-    assert tokens[5] == "-c"
-    assert tokens[6] == BOOTSTRAP_STUB
-    assert base64.b64decode(tokens[7]) == EMBEDDED_SOURCE
-    assert tokens[9] == tree
-    assert tokens[10] == "dislocker_ui.privileged"
+    assert tokens[1:4] == ["-I", "-S", "-s"]
+    assert tokens[4] == "-c"
+    assert tokens[5] == BOOTSTRAP_STUB
+    assert base64.b64decode(tokens[6]) == EMBEDDED_SOURCE
+    assert tokens[8] == tree
+    assert tokens[9] == "dislocker_ui.privileged"
     assert "-m" not in tokens
     assert "PYTHONPATH" not in cmd
     with pytest.raises(RunnerError, match="checkout digest"):
