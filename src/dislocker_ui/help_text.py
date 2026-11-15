@@ -66,9 +66,11 @@ Cannot open the disk: launch with sudo ./run.sh — an
 unprivileged GUI is blocked by macOS TCC. If mounts
 still fail with EPERM, allow Terminal under Privacy
 & Security, Removable Volumes (or Full Disk Access).
-"Refusing to elevate: ...": a broken .py symlink under
-src/ must be removed (sudo ./run.sh refuses importable .py
-symlinks too). For an unreadable entry (e.g. a mode-0700
+"Refusing to elevate: ...": a broken or importable .py
+symlink under src/ must be removed (sudo ./run.sh refuses
+those too). If the message names the Python interpreter,
+this Python is one you can rewrite; launch with
+sudo ./run.sh. For an unreadable entry (e.g. a mode-0700
 __pycache__ left by an earlier sudo ./run.sh), follow the
 printed hint, or launch with sudo ./run.sh.
 """

@@ -4,7 +4,9 @@ macOS administrator elevation for dislocker-ui mount/unmount.
 Overall purpose:
   When the GUI runs unprivileged on Darwin, wrap the mount/unmount pipeline in
   an osascript ``do shell script … with administrator privileges`` call that
-  launches a privileged Python child (``dislocker_ui.privileged``). Secrets
+  launches a privileged Python child through the checkout seal, which imports
+  ``dislocker_ui.privileged`` only after the authorized tree digest matches.
+  Secrets
   travel only via a mode-0600 request file — never in AppleScript.
 
 Inputs:
@@ -26,6 +28,7 @@ Requirements:
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import errno
 import fcntl
@@ -43,6 +46,13 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from dislocker_ui import session as session_mod
+from dislocker_ui.checkout_seal import (
+    BOOTSTRAP_STUB,
+    EMBEDDED_SOURCE,
+    SealError,
+    assert_root_owned_interpreter,
+    measure,
+)
 from dislocker_ui.mount_policy import is_physical_volume
 from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod
 from dislocker_ui.session import MountSession, load_session, root_log_path, root_session_path
@@ -196,6 +206,8 @@ def prepare_elevation_paths() -> tuple[Path, Path]:
     # packages where site-packages is the root (pip controls file modes, and
     # scanning site-packages recursively would be prohibitively slow).
     _assert_no_writable_py_files(src_root)
+    # Content replacement and importable symlinks are sealed immediately
+    # before the dialog, inside _run_osascript, and again in the root child.
     # These temp files live in the persistent Application Support dir (not a
     # reboot-cleared temp dir) so the child can confine them; sweep any left
     # behind by a killed run first — a stale request file can hold a secret.
@@ -450,29 +462,46 @@ def build_osascript(shell_command: str, *, prompt: str = _ADMIN_PROMPT) -> str:
     )
 
 
-def build_privileged_shell_command(action: str, request_path: Path, *, request_sha256: str) -> str:
+def build_privileged_shell_command(
+    action: str,
+    request_path: Path,
+    *,
+    request_sha256: str,
+    tree_sha256: str,
+) -> str:
     """
-    Assemble ``cd / && env PYTHONPATH=… python -s -P -m dislocker_ui.privileged …``.
+    Assemble ``cd / && python -I -S -c <seal> …`` (no ``python -m``).
 
     Each argv token is shlex-quoted; the result is NOT yet AppleScript-escaped.
+    The checkout digest and the seal source are part of the command the
+    administrator approves. The root process runs that seal before it imports
+    ``dislocker_ui``, so a module rewritten during the dialog does not run.
 
-    *request_sha256* is the hex SHA-256 of the exact request-file bytes. It
-    travels inside the administrator-authorized command so the privileged
-    child can reject a request swapped after the prompt appeared.
+    *request_sha256* is the hex SHA-256 of the exact request-file bytes.
+    *tree_sha256* is the hex SHA-256 from :func:`dislocker_ui.checkout_seal.measure`.
     """
     if action not in ("mount", "unmount"):
         raise RunnerError(f"Invalid privileged action: {action}")
     if not _REQUEST_SHA256_RE.fullmatch(request_sha256 or ""):
         raise RunnerError("Invalid request digest for privileged command")
+    if not _REQUEST_SHA256_RE.fullmatch(tree_sha256 or ""):
+        raise RunnerError("Invalid checkout digest for privileged command")
+    if not EMBEDDED_SOURCE:
+        raise RunnerError("Refusing to elevate: checkout seal source is unavailable")
     python = str(Path(sys.executable).resolve())
-    src_root = Path(__file__).resolve().parent.parent
+    src_root = str(Path(__file__).resolve().parent.parent)
+    payload = base64.b64encode(EMBEDDED_SOURCE).decode("ascii")
     argv = [
-        "env",
-        f"PYTHONPATH={src_root}",
         python,
+        "-I",
+        "-S",
         "-s",
         "-P",
-        "-m",
+        "-c",
+        BOOTSTRAP_STUB,
+        payload,
+        src_root,
+        tree_sha256,
         "dislocker_ui.privileged",
         action,
         "--uid",
@@ -593,7 +622,17 @@ def _run_osascript(
     """Invoke osascript; raise classified errors on non-zero exit."""
     if not _REQUEST_SHA256_RE.fullmatch(request_sha256 or ""):
         raise RunnerError("Invalid request digest for elevation")
-    shell_cmd = build_privileged_shell_command(action, request_path, request_sha256=request_sha256)
+    try:
+        assert_root_owned_interpreter(Path(sys.executable))
+        tree_sha256 = measure(Path(__file__).resolve().parent.parent)
+    except SealError as exc:
+        raise RunnerError(f"Refusing to elevate: {exc}") from exc
+    shell_cmd = build_privileged_shell_command(
+        action,
+        request_path,
+        request_sha256=request_sha256,
+        tree_sha256=tree_sha256,
+    )
     script = build_osascript(shell_cmd)
     log("Requesting administrator privileges…")
     try:

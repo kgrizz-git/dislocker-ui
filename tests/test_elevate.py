@@ -73,7 +73,9 @@ def test_quoting_handles_spaces_quotes_dollar_backticks(tmp_path: Path) -> None:
     """shlex quoting protects spaces, quotes, $, and backticks in paths."""
     tricky = tmp_path / 'req $`" weird.json'
     tricky.write_text("{}", encoding="utf-8")
-    cmd = build_privileged_shell_command("mount", tricky, request_sha256="ab" * 32)
+    cmd = build_privileged_shell_command(
+        "mount", tricky, request_sha256="ab" * 32, tree_sha256="cd" * 32
+    )
     assert "cd / &&" in cmd
     assert "-s" in cmd
     assert "-P" in cmd
@@ -93,7 +95,9 @@ def test_applescript_contains_request_path_not_secret(tmp_path: Path) -> None:
     req_path = tmp_path / "request.json"
     req_path.write_text("{}", encoding="utf-8")
     secret = "SuperSecretPassword123!"
-    cmd = build_privileged_shell_command("mount", req_path, request_sha256="ab" * 32)
+    cmd = build_privileged_shell_command(
+        "mount", req_path, request_sha256="ab" * 32, tree_sha256="cd" * 32
+    )
     script = build_osascript(cmd)
     assert str(req_path.resolve()) in cmd
     assert secret not in script
@@ -260,7 +264,11 @@ def test_run_elevated_mount_success_loads_session(tmp_path: Path) -> None:
         # Recover path from script is hard; just succeed.
         return type("R", (), {"returncode": 0, "stderr": "", "stdout": ""})()
 
-    with patch("dislocker_ui.elevate.subprocess.run", side_effect=fake_run):
+    with (
+        patch("dislocker_ui.elevate.subprocess.run", side_effect=fake_run),
+        # CI's Python is not root-owned; the ownership rule has its own test.
+        patch("dislocker_ui.elevate.assert_root_owned_interpreter"),
+    ):
         result = run_elevated_mount(
             req,
             logs.append,
@@ -302,6 +310,7 @@ def test_run_elevated_mount_cancel_unlinks_request(tmp_path: Path) -> None:
     with (
         patch("dislocker_ui.elevate.tempfile.mkstemp", side_effect=tracking_mkstemp),
         patch("dislocker_ui.elevate.subprocess.run", side_effect=fake_run),
+        patch("dislocker_ui.elevate.assert_root_owned_interpreter"),
         pytest.raises(ElevationCancelled),
     ):
         run_elevated_mount(
@@ -393,7 +402,9 @@ def test_privileged_command_binds_request_digest(tmp_path: Path) -> None:
     req_path = tmp_path / "request.json"
     req_path.write_text("{}", encoding="utf-8")
     digest = "cd" * 32
-    cmd = build_privileged_shell_command("mount", req_path, request_sha256=digest)
+    cmd = build_privileged_shell_command(
+        "mount", req_path, request_sha256=digest, tree_sha256="ab" * 32
+    )
     assert "--request-sha256" in cmd
     assert digest in cmd
 
@@ -404,8 +415,71 @@ def test_privileged_command_rejects_invalid_digest(tmp_path: Path) -> None:
 
     req_path = tmp_path / "request.json"
     req_path.write_text("{}", encoding="utf-8")
-    with pytest.raises(RunnerError, match="digest"):
-        build_privileged_shell_command("mount", req_path, request_sha256="not-a-digest")
+    with pytest.raises(RunnerError, match="request digest"):
+        build_privileged_shell_command(
+            "mount",
+            req_path,
+            request_sha256="not-a-digest",
+            tree_sha256="ab" * 32,
+        )
+
+
+def test_privileged_command_binds_checkout_and_does_not_use_python_m(tmp_path: Path) -> None:
+    """The authorized command seals the checkout before importing the package."""
+    import base64
+    import shlex
+    import sys
+
+    from dislocker_ui.checkout_seal import BOOTSTRAP_STUB, EMBEDDED_SOURCE
+
+    req_path = tmp_path / "request.json"
+    req_path.write_text("{}", encoding="utf-8")
+    tree = "ef" * 32
+    cmd = build_privileged_shell_command(
+        "mount", req_path, request_sha256="ab" * 32, tree_sha256=tree
+    )
+    tokens = shlex.split(cmd.removeprefix("cd / && "))
+    assert tokens[0] == str(Path(sys.executable).resolve())
+    assert tokens[1:5] == ["-I", "-S", "-s", "-P"]
+    assert tokens[5] == "-c"
+    assert tokens[6] == BOOTSTRAP_STUB
+    assert base64.b64decode(tokens[7]) == EMBEDDED_SOURCE
+    assert tokens[9] == tree
+    assert tokens[10] == "dislocker_ui.privileged"
+    assert "-m" not in tokens
+    assert "PYTHONPATH" not in cmd
+    with pytest.raises(RunnerError, match="checkout digest"):
+        build_privileged_shell_command(
+            "mount", req_path, request_sha256="ab" * 32, tree_sha256="not-a-tree"
+        )
+
+
+def test_dialog_refuses_user_owned_interpreter_before_osascript(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A replaceable Python never reaches the administrator dialog."""
+    py = tmp_path / "python3"
+    py.write_text("", encoding="utf-8")
+    py.chmod(0o755)
+    monkeypatch.setattr("dislocker_ui.elevate.sys.executable", str(py))
+    req = MountRequest(
+        volume="/dev/disk2s1",
+        method=UnlockMethod.USER_PASSWORD,
+        secret="sekrit",
+        readonly=True,
+    )
+    with (
+        patch("dislocker_ui.elevate.subprocess.run") as run,
+        pytest.raises(RunnerError, match="root-owned"),
+    ):
+        run_elevated_mount(
+            req,
+            lambda _message: None,
+            session_path=tmp_path / "session.json",
+            log_path=tmp_path / "elev.log",
+            request_dir=tmp_path,
+        )
+    run.assert_not_called()
 
 
 def test_prepare_elevation_paths_checks_writable_py_files(

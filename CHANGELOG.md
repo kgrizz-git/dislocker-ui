@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 
+## [0.7.1] - 2026-11-14
+
+### Security
+
+- The administrator dialog now carries a digest of the checkout and a
+  small seal program. The root process runs that seal before it imports
+  dislocker-ui, and it imports a private copy of the bytes it just
+  hashed. Replacing a source file while the dialog is open makes the
+  root process exit instead of running the replacement. Importable
+  symlinks under `src/` are refused, the same as `sudo ./run.sh`.
+- The dialog refuses a Python interpreter the user can rewrite (pyenv,
+  a user-owned Homebrew). Use `sudo ./run.sh` in that case. That launcher
+  checks the tree after the password prompt and then starts Python.
+
 ## [0.7.0] - 2026-10-17
 
 ### Added

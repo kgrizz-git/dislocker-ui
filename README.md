@@ -136,7 +136,10 @@ Notes:
 - Mounts need an already-root GUI: double-click `dislocker-ui.command`
   (admin password in Terminal) or run `sudo ./run.sh`. The osascript
   administrator-dialog path cannot open physical removable volumes under
-  TCC. Elevating from a user-writable checkout is no stronger than that.
+  TCC. When that dialog does run, it re-checks the checkout inside the
+  root process before importing project code, and it requires a
+  root-owned Python. A user-owned interpreter (pyenv, Homebrew) should
+  use `sudo ./run.sh`.
 
 ### 4. One-time root install (optional helper)
 
