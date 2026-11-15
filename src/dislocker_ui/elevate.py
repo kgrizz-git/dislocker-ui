@@ -4,7 +4,9 @@ macOS administrator elevation for dislocker-ui mount/unmount.
 Overall purpose:
   When the GUI runs unprivileged on Darwin, wrap the mount/unmount pipeline in
   an osascript ``do shell script … with administrator privileges`` call that
-  launches a privileged Python child (``dislocker_ui.privileged``). Secrets
+  launches a privileged Python child through the checkout seal, which imports
+  ``dislocker_ui.privileged`` only after the authorized tree digest matches.
+  Secrets
   travel only via a mode-0600 request file — never in AppleScript.
 
 Inputs:
@@ -19,13 +21,15 @@ Outputs:
   prepare cannot sweep another transaction's request/log files.
 
 Requirements:
-  macOS ``/usr/bin/osascript``; absolute sys.executable and PYTHONPATH embedded
-  in the shell string (admin do shell script does not inherit parent env).
+  macOS ``/usr/bin/osascript``. The shell string embeds the absolute
+  interpreter path the ownership check just returned (admin do shell script
+  does not inherit parent env, and the path is not resolved a second time).
   Standard library only.
 """
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import errno
 import fcntl
@@ -43,6 +47,13 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from dislocker_ui import session as session_mod
+from dislocker_ui.checkout_seal import (
+    BOOTSTRAP_STUB,
+    EMBEDDED_SOURCE,
+    SealError,
+    assert_root_owned_interpreter,
+    measure,
+)
 from dislocker_ui.mount_policy import is_physical_volume
 from dislocker_ui.runner import MountRequest, RunnerError, UnlockMethod
 from dislocker_ui.session import MountSession, load_session, root_log_path, root_session_path
@@ -192,10 +203,13 @@ def prepare_elevation_paths() -> tuple[Path, Path]:
     # Reject group/world-writable .py files: an attacker with group-write on
     # the checkout could trojan a module that root imports via PYTHONPATH.
     # Scan src_root (the actual PYTHONPATH entry), not just package_dir, so a
-    # writable sibling like src/os.py is also caught.  Skip for pip-installed
-    # packages where site-packages is the root (pip controls file modes, and
-    # scanning site-packages recursively would be prohibitively slow).
+    # writable sibling like src/os.py is also caught. A root-owned
+    # site-packages skips this walk because scanning every installed project
+    # is slow. That skip is not a trust decision: the path check above still
+    # ran, and _run_osascript seals the dislocker_ui package before the dialog.
     _assert_no_writable_py_files(src_root)
+    # Content replacement and importable symlinks are sealed immediately
+    # before the dialog, inside _run_osascript, and again in the root child.
     # These temp files live in the persistent Application Support dir (not a
     # reboot-cleared temp dir) so the child can confine them; sweep any left
     # behind by a killed run first — a stale request file can hold a secret.
@@ -411,11 +425,12 @@ def _check_unclassified_entry(entry: Path) -> None:
 
 
 def _is_system_managed_install(src_root: Path) -> bool:
-    """True when *src_root* is a root-owned pip-managed site-packages directory.
+    """True when the pre-dialog walk would scan a root-owned install tree.
 
-    In that case the package manager owns file integrity and a recursive scan
-    would be too slow to run before every elevation.  A user-controlled
-    directory merely named ``site-packages`` is not exempt.
+    The walk is skipped because scanning every project in site-packages is
+    slow. It does not treat those files as trusted: the checkout seal hashes
+    the ``dislocker_ui`` package and the root child imports a private copy.
+    A user-controlled directory merely named ``site-packages`` is not skipped.
     """
     if src_root.name not in ("site-packages", "dist-packages"):
         return False
@@ -450,29 +465,52 @@ def build_osascript(shell_command: str, *, prompt: str = _ADMIN_PROMPT) -> str:
     )
 
 
-def build_privileged_shell_command(action: str, request_path: Path, *, request_sha256: str) -> str:
+def build_privileged_shell_command(
+    action: str,
+    request_path: Path,
+    *,
+    request_sha256: str,
+    tree_sha256: str,
+    interpreter: Path,
+) -> str:
     """
-    Assemble ``cd / && env PYTHONPATH=… python -s -P -m dislocker_ui.privileged …``.
+    Assemble ``cd / && python -I -S -c <seal> …`` (no ``python -m``).
 
+    ``-P`` is omitted: Python 3.10 rejects it, and ``cd /`` plus the seal's
+    path filter already keep the working directory off ``sys.path``.
     Each argv token is shlex-quoted; the result is NOT yet AppleScript-escaped.
+    The checkout digest and the seal source are part of the command the
+    administrator approves. The root process runs that seal before it imports
+    ``dislocker_ui``, so a module rewritten during the dialog does not run.
 
-    *request_sha256* is the hex SHA-256 of the exact request-file bytes. It
-    travels inside the administrator-authorized command so the privileged
-    child can reject a request swapped after the prompt appeared.
+    *request_sha256* is the hex SHA-256 of the exact request-file bytes.
+    *tree_sha256* is the hex SHA-256 from :func:`dislocker_ui.checkout_seal.measure`.
+    *interpreter* is the absolute path :func:`assert_root_owned_interpreter`
+    already validated. It is embedded as given and is not resolved again.
     """
     if action not in ("mount", "unmount"):
         raise RunnerError(f"Invalid privileged action: {action}")
     if not _REQUEST_SHA256_RE.fullmatch(request_sha256 or ""):
         raise RunnerError("Invalid request digest for privileged command")
-    python = str(Path(sys.executable).resolve())
-    src_root = Path(__file__).resolve().parent.parent
+    if not _REQUEST_SHA256_RE.fullmatch(tree_sha256 or ""):
+        raise RunnerError("Invalid checkout digest for privileged command")
+    if not interpreter.is_absolute():
+        raise RunnerError("Privileged command requires an absolute interpreter path")
+    if not EMBEDDED_SOURCE:
+        raise RunnerError("Refusing to elevate: checkout seal source is unavailable")
+    python = str(interpreter)
+    src_root = str(Path(__file__).resolve().parent.parent)
+    payload = base64.b64encode(EMBEDDED_SOURCE).decode("ascii")
     argv = [
-        "env",
-        f"PYTHONPATH={src_root}",
         python,
+        "-I",
+        "-S",
         "-s",
-        "-P",
-        "-m",
+        "-c",
+        BOOTSTRAP_STUB,
+        payload,
+        src_root,
+        tree_sha256,
         "dislocker_ui.privileged",
         action,
         "--uid",
@@ -593,7 +631,18 @@ def _run_osascript(
     """Invoke osascript; raise classified errors on non-zero exit."""
     if not _REQUEST_SHA256_RE.fullmatch(request_sha256 or ""):
         raise RunnerError("Invalid request digest for elevation")
-    shell_cmd = build_privileged_shell_command(action, request_path, request_sha256=request_sha256)
+    try:
+        interpreter = assert_root_owned_interpreter(Path(sys.executable))
+        tree_sha256 = measure(Path(__file__).resolve().parent.parent)
+    except SealError as exc:
+        raise RunnerError(f"Refusing to elevate: {exc}") from exc
+    shell_cmd = build_privileged_shell_command(
+        action,
+        request_path,
+        request_sha256=request_sha256,
+        tree_sha256=tree_sha256,
+        interpreter=interpreter,
+    )
     script = build_osascript(shell_cmd)
     log("Requesting administrator privileges…")
     try:

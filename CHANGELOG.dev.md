@@ -6,6 +6,17 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [0.7.1] - 2026-11-14
+
+### Added
+
+- `checkout_seal.py` and `tests/test_checkout_seal.py`: the dialog path
+  binds a checkout digest and re-checks it in a fresh `-I -S` interpreter
+  before importing the package. The authorized command does not pass
+  `-P`, which Python 3.10 rejects. Elevation tests that drive a successful
+  dialog stub the root-owned-interpreter check, because CI's Python is
+  not root-owned; a separate test covers that refusal.
+
 ## [0.7.0] - 2026-10-17
 
 ### Changed

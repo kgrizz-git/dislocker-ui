@@ -3,6 +3,11 @@
 The request file is an untrusted, short-lived transport for mount intent.  It
 never selects a session path, log path, or executable.  Those root authority
 boundaries are derived locally from the authenticated UID.
+
+The administrator-dialog path must enter through ``checkout_seal`` (embedded
+in the authorized command) so this module's imports run only after the
+checkout digest matches. Calling ``python -m dislocker_ui.privileged`` skips
+that check because the imports above ``main()`` run first.
 """
 
 from __future__ import annotations

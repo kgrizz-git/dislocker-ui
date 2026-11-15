@@ -30,6 +30,7 @@ BitLocker cryptography and should not vendor dislocker sources.
 | `runner.py` | Mount/unmount facade (elevate or in-process) |
 | `unmount_steps.py` | Unmount step functions (umount / detach / rmdir) + shared subprocess helpers |
 | `elevate.py` | osascript admin prompt + request file protocol |
+| `checkout_seal.py` | Digest the checkout and import it only after the root child re-checks |
 | `privileged.py` | Root child: validate request, run pipeline |
 | `ntfs_mount.py` | ntfs-3g options / ownership helpers |
 | `gui.py` | tkinter UI |
@@ -131,7 +132,9 @@ launch with ``sudo ./run.sh`` (or double-click `dislocker-ui.command`) so the
 GUI is already root and runs the mount pipeline in-process. (The TCC gate on
 removable device opens keys on launch context, not uid — a root child spawned
 by an osascript admin prompt is still blocked; see
-`plans/double-clickable-app.md`.) Do not weaken trust checks by copying volume
+`plans/double-clickable-app.md`.) That dialog still runs project code as
+root, so it seals the checkout (digest in the authorized command, re-check
+before import) and refuses a user-owned Python. Do not weaken trust checks by copying volume
 contents into world-readable temp files unless the user asks for a decrypt-to-file
 feature. Never commit passwords, recovery keys, `.bek` files, or session dumps
 with secrets. BitLocker secrets may still appear briefly on `dislocker-fuse`
