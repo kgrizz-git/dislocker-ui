@@ -6,6 +6,16 @@ See `CHANGELOG.md` for mount/UI behavior users care about.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Version numbers match `VERSION` / SemVer with the public changelog.
 
+## [Unreleased]
+
+### Changed
+
+- `plans/README.md` states that a finished plan is archived through a
+  pull request. Prefer the implementing pull request. A follow-up pull
+  request is used when that pull request has already merged, when a
+  later check finishes the plan, or when the plan is abandoned. The
+  elevation checkout seal plan is archived that way after PR #24.
+
 ## [0.7.1] - 2026-11-14
 
 ### Added
@@ -16,12 +26,6 @@ Version numbers match `VERSION` / SemVer with the public changelog.
   `-P`, which Python 3.10 rejects. Elevation tests that drive a successful
   dialog stub the root-owned-interpreter check, because CI's Python is
   not root-owned; a separate test covers that refusal.
-
-### Changed
-
-- `plans/README.md` states that a finished plan is archived in the pull
-  request that implements it, before merge. The elevation checkout seal
-  plan is archived after PR #24.
 
 ## [0.7.0] - 2026-10-17
 

@@ -18,8 +18,8 @@ Tracked implementation plans for **dislocker-ui**.
 2. **Mirror open checklist items** into root [`TO_DO.md`](../TO_DO.md). Link the plan from the TO_DO section.
 3. **While working**, check off items in the plan file if useful; keep `TO_DO.md` as the live queue.
 4. **When a checklist item is done**, remove it from `TO_DO.md` (do not leave a long history of completed checkboxes there).
-5. **Archive a finished plan in the pull request that implements it**, before that pull request merges. `main` receives the archive only through that merge. Do not add a follow-up commit on `main` to archive a plan after its pull request has merged. An abandoned plan is archived in its own small pull request.
-   - Move `plans/<name>.md` → `plans/archive/YYYY-MM-DD-<name>.md` (the date is the day the implementing pull request is ready, or the day the plan is abandoned).
+5. **Archive a finished plan through a pull request.** Prefer the pull request that implements the plan, before that pull request merges. When that pull request has already merged, or a later check such as a smoke test is what finishes the plan, use a small follow-up pull request. An abandoned plan uses its own small pull request. Do not commit the archive directly on `main`.
+   - Move `plans/<name>.md` → `plans/archive/YYYY-MM-DD-<name>.md`. The date is the day the plan moves into the archive.
    - Strip any remaining TO_DO entries for that plan.
    - Record user-visible impact in `CHANGELOG.md` + `VERSION`; harness-only notes in `CHANGELOG.dev.md`.
 6. **Do not** put secrets, recovery keys, or machine-specific home paths in plans.

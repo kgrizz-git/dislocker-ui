@@ -7,7 +7,7 @@ Open work only for **dislocker-ui**.
 - Add new work here when it is actually queued.
 - Link the matching plan under [`plans/`](plans/) when one exists.
 - **When an item is finished, delete it from this file** — do not accumulate checked-off history here.
-- When an entire plan is finished, move it to [`plans/archive/`](plans/archive/) in the pull request that implements it, before that pull request merges, and remove its section below. Do not commit that archive on `main` afterward.
+- When an entire plan is finished, move it to [`plans/archive/`](plans/archive/) through a pull request and remove its section below. Prefer the implementing pull request while it is still open. Use a small follow-up pull request when that pull request has already merged, when a later check finishes the plan, or when the plan is abandoned. Do not commit that archive on `main`.
 - User-visible completions also need `VERSION` + [`CHANGELOG.md`](CHANGELOG.md); harness-only notes go in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
 - See [`plans/README.md`](plans/README.md) for the full plans workflow.
 
@@ -25,7 +25,8 @@ Open work only for **dislocker-ui**.
      session. Compare `diskutil list` before and after: no unrelated
      disk may be ejected.
   If step 3 misbehaves, add a wrapper `trap` or a SIGHUP handler in
-  `__main__.py` (see the plan). When it passes, archive the plan.
+  `__main__.py` (see the plan). When it passes, archive the plan in a
+  small pull request.
 
 ## Active
 
