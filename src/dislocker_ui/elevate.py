@@ -21,8 +21,9 @@ Outputs:
   prepare cannot sweep another transaction's request/log files.
 
 Requirements:
-  macOS ``/usr/bin/osascript``; absolute sys.executable and PYTHONPATH embedded
-  in the shell string (admin do shell script does not inherit parent env).
+  macOS ``/usr/bin/osascript``. The shell string embeds the absolute
+  interpreter path the ownership check just returned (admin do shell script
+  does not inherit parent env, and the path is not resolved a second time).
   Standard library only.
 """
 
@@ -470,6 +471,7 @@ def build_privileged_shell_command(
     *,
     request_sha256: str,
     tree_sha256: str,
+    interpreter: Path,
 ) -> str:
     """
     Assemble ``cd / && python -I -S -c <seal> …`` (no ``python -m``).
@@ -483,6 +485,8 @@ def build_privileged_shell_command(
 
     *request_sha256* is the hex SHA-256 of the exact request-file bytes.
     *tree_sha256* is the hex SHA-256 from :func:`dislocker_ui.checkout_seal.measure`.
+    *interpreter* is the absolute path :func:`assert_root_owned_interpreter`
+    already validated. It is embedded as given and is not resolved again.
     """
     if action not in ("mount", "unmount"):
         raise RunnerError(f"Invalid privileged action: {action}")
@@ -490,9 +494,11 @@ def build_privileged_shell_command(
         raise RunnerError("Invalid request digest for privileged command")
     if not _REQUEST_SHA256_RE.fullmatch(tree_sha256 or ""):
         raise RunnerError("Invalid checkout digest for privileged command")
+    if not interpreter.is_absolute():
+        raise RunnerError("Privileged command requires an absolute interpreter path")
     if not EMBEDDED_SOURCE:
         raise RunnerError("Refusing to elevate: checkout seal source is unavailable")
-    python = str(Path(sys.executable).resolve())
+    python = str(interpreter)
     src_root = str(Path(__file__).resolve().parent.parent)
     payload = base64.b64encode(EMBEDDED_SOURCE).decode("ascii")
     argv = [
@@ -626,7 +632,7 @@ def _run_osascript(
     if not _REQUEST_SHA256_RE.fullmatch(request_sha256 or ""):
         raise RunnerError("Invalid request digest for elevation")
     try:
-        assert_root_owned_interpreter(Path(sys.executable))
+        interpreter = assert_root_owned_interpreter(Path(sys.executable))
         tree_sha256 = measure(Path(__file__).resolve().parent.parent)
     except SealError as exc:
         raise RunnerError(f"Refusing to elevate: {exc}") from exc
@@ -635,6 +641,7 @@ def _run_osascript(
         request_path,
         request_sha256=request_sha256,
         tree_sha256=tree_sha256,
+        interpreter=interpreter,
     )
     script = build_osascript(shell_cmd)
     log("Requesting administrator privileges…")

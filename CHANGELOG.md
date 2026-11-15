@@ -20,7 +20,10 @@ Developer / harness-only notes live in [`CHANGELOG.dev.md`](CHANGELOG.dev.md).
   A root-owned `site-packages` directory is not treated as already
   safe: the `dislocker_ui` package bytes are sealed the same way.
   The private copy is created in a root-owned directory, not in the
-  caller's temporary directory.
+  caller's temporary directory. A named pipe with an importable name
+  is refused without waiting for a writer. The dialog command runs the
+  interpreter path the ownership check just approved, rather than
+  resolving that path again.
 - The dialog refuses a Python interpreter the user can rewrite (pyenv,
   a user-owned Homebrew). Use `sudo ./run.sh` in that case. That launcher
   checks the tree after the password prompt and then starts Python.

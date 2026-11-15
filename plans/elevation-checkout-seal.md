@@ -27,6 +27,10 @@ same-mode rewrite of a user-owned module during the wait became root code.
   path for pyenv and user-owned Homebrew.
 - Do not skip file bytes because `site-packages` is root-owned. Seal the
   `dislocker_ui` package and import the private copy.
+- Open importable paths with `O_NONBLOCK` as well as `O_NOFOLLOW`, so a
+  FIFO is refused instead of stalling the open.
+- Embed the interpreter path returned by the ownership check. Do not
+  resolve it again while building the authorized command.
 
 ## Checklist
 
@@ -37,3 +41,5 @@ same-mode rewrite of a user-owned module during the wait became root code.
 - [x] User-owned interpreter never reaches `osascript`.
 - [x] Root creates the private copy outside the caller's temporary directory.
 - [x] An install root imports the private package copy; a missing package is refused.
+- [x] An importable FIFO is refused without blocking.
+- [x] The authorized command uses the interpreter path the ownership check returned.

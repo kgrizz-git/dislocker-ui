@@ -244,9 +244,14 @@ def _read_importable(
     records: list[str],
     files: list[tuple[str, bytes]],
 ) -> None:
-    """Read one regular importable file without following a link. Record its bytes."""
+    """Read one regular importable file without following a link. Record its bytes.
+
+    ``O_NONBLOCK`` is required: opening a FIFO for reading waits for a writer
+    unless the open is non-blocking. The type check below then refuses it.
+    ``O_NOFOLLOW`` still rejects a symlink swapped onto this path.
+    """
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError as exc:
         raise SealError(f"cannot inspect {path} ({exc})") from exc
     try:
@@ -369,20 +374,25 @@ def _write_sealed_file(dest: Path, rel: str, data: bytes) -> None:
         os.close(fd)
 
 
-def assert_root_owned_interpreter(executable: Path) -> None:
-    """Refuse a Python the unprivileged user can replace while the dialog is open.
+def assert_root_owned_interpreter(executable: Path) -> Path:
+    """Return the canonical interpreter path, or refuse one the user can replace.
 
     The seal runs inside that interpreter. A user-owned binary (pyenv,
     Homebrew) can be swapped for the whole wait, so the dialog path requires
     a root-owned interpreter with no group/world-writable ancestor. Launch
     with ``sudo ./run.sh`` otherwise; that path checks the tree after sudo
     returns and then execs immediately.
+
+    The returned path is the one the authorized command must execute. Callers
+    must not resolve the interpreter again: a symlink could change between
+    this check and a second resolve.
     """
     try:
         resolved = executable.resolve(strict=True)
     except OSError as exc:
         raise SealError(f"cannot resolve Python interpreter ({exc})") from exc
     _assert_root_owned_chain(resolved)
+    return resolved
 
 
 def _assert_root_owned_chain(resolved: Path) -> None:

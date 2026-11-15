@@ -19,6 +19,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -153,6 +154,27 @@ def test_measure_ignores_non_importable_symlink_and_pruned_dirs(tmp_path: Path) 
     first = measure(root)
     note.write_text("two", encoding="utf-8")
     assert measure(root) == first
+
+
+def test_importable_fifo_is_refused_without_blocking(tmp_path: Path) -> None:
+    """A FIFO with an importable name is refused without waiting for a writer."""
+    root = _checkout(tmp_path)
+    os.mkfifo(root / "dislocker_ui" / "hook.py")
+    holder: dict[str, object] = {}
+
+    def _run() -> None:
+        try:
+            measure(root)
+        except SealError as exc:
+            holder["error"] = exc
+
+    worker = threading.Thread(target=_run, daemon=True)
+    worker.start()
+    worker.join(2)
+    assert not worker.is_alive()
+    error = holder.get("error")
+    assert isinstance(error, SealError)
+    assert "not a regular file" in str(error)
 
 
 def test_measure_refuses_group_writable_module(tmp_path: Path) -> None:
@@ -347,6 +369,23 @@ def test_user_owned_interpreter_is_refused(tmp_path: Path) -> None:
     py.chmod(0o755)
     with pytest.raises(SealError, match="root-owned"):
         assert_root_owned_interpreter(py)
+
+
+def test_interpreter_check_returns_the_validated_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The path returned is the canonical path the chain check accepted."""
+    binary = tmp_path / "python3"
+    binary.write_text("", encoding="utf-8")
+    seen: list[Path] = []
+
+    def _accept(path: Path) -> None:
+        seen.append(path)
+
+    monkeypatch.setattr("dislocker_ui.checkout_seal._assert_root_owned_chain", _accept)
+    resolved = assert_root_owned_interpreter(binary)
+    assert resolved == binary.resolve()
+    assert seen == [resolved]
 
 
 def test_root_owned_chain_accepts_only_nonwritable_root_path(
